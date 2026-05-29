@@ -8,8 +8,6 @@ from typing import Any
 from fastmcp import FastMCP
 
 from .config import (
-    USERNAME,
-    PASSWORD,
     FIRMWARE_DIR,
     DEFAULT_TENANT_ID,
     CREDENTIAL_PROVIDER,
@@ -35,13 +33,25 @@ mcp = FastMCP("Percepxion-Server")
 
 @mcp.tool()
 def login_with_env() -> dict[str, Any]:
-    """Authenticate using PERCEPXION_USERNAME and PERCEPXION_PASSWORD from .env."""
-    if not USERNAME or not PASSWORD:
-        return _err("Missing PERCEPXION_USERNAME or PERCEPXION_PASSWORD in .env.")
+    """
+    Authenticate using credentials from the configured provider.
+
+    The provider is selected by PERCEPXION_CREDENTIAL_PROVIDER (default: 'env').
+    - env: reads PERCEPXION_USERNAME + PERCEPXION_PASSWORD from environment
+    - vault: reads from HashiCorp Vault (requires VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH)
+    - aws: reads from AWS Secrets Manager (requires AWS_SECRET_NAME, AWS_REGION)
+    """
+    from .providers import get_provider
+
+    try:
+        provider = get_provider(CREDENTIAL_PROVIDER)
+        creds = provider.get_credentials()
+    except Exception as exc:
+        return _err(f"Failed to load credentials from provider '{CREDENTIAL_PROVIDER}': {exc}")
 
     resp = _api_post(
         "/v2/user/login",
-        json_body={"username": USERNAME, "password": PASSWORD},
+        json_body={"username": creds["username"], "password": creds["password"]},
         require_auth=False,
     )
     if not resp["ok"]:
@@ -55,8 +65,8 @@ def login_with_env() -> dict[str, Any]:
 
     session.auth_token = token
     session.csrf_token = csrf
-    logger.info("Authenticated as %s", USERNAME)
-    return _ok({"message": "Authenticated successfully.", "username": USERNAME})
+    logger.info("Authenticated via %s provider", CREDENTIAL_PROVIDER)
+    return _ok({"message": "Authenticated successfully.", "username": creds["username"]})
 
 
 @mcp.tool()
