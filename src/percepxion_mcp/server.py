@@ -70,6 +70,35 @@ def login_with_env() -> dict[str, Any]:
 
 
 @mcp.tool()
+def reconfigure_credentials(provider: str) -> dict[str, Any]:
+    """
+    Switch the active credential provider and clear the current session.
+
+    After calling this, run login_with_env to authenticate with the new provider.
+    Valid providers: 'env', 'vault', 'aws'.
+
+    Args:
+        provider: The credential provider to activate.
+    """
+    import os
+    from .providers import get_provider
+
+    valid = {"env", "vault", "aws"}
+    if provider not in valid:
+        return _err(f"Invalid provider '{provider}'. Choose: {', '.join(sorted(valid))}")
+
+    try:
+        get_provider(provider)  # validate it can be instantiated
+    except Exception as exc:
+        return _err(f"Provider '{provider}' failed to initialize: {exc}")
+
+    os.environ["PERCEPXION_CREDENTIAL_PROVIDER"] = provider
+    session.clear()
+    logger.info("Credential provider switched to '%s', session cleared", provider)
+    return _ok({"message": f"Provider set to '{provider}'. Run login_with_env to authenticate."})
+
+
+@mcp.tool()
 def get_device_list(
     search_query: str = "*",
     limit: int = 25,
