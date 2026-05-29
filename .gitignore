@@ -36,3 +36,6 @@ htmlcov/
 
 # Logs
 *.log
+
+# AI workflow tooling (implementation plans, agent artifacts)
+docs/superpowers/

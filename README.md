@@ -1,9 +1,6 @@
-> **This repository has been archived.** The project has moved to the official Lantronix organization:
-> **[github.com/Lantronix/percepxion-mcp-server](https://github.com/Lantronix/percepxion-mcp-server)**
-
 # Percepxion MCP Server
 
-A Python [FastMCP](https://github.com/jlowin/fastmcp) server that exposes the [Percepxion](https://gopercepxion.ai) REST API as MCP tools. Connect it to Claude Desktop, Claude Code, or any MCP-compatible client to manage out-of-band infrastructure through natural language.
+A Python [FastMCP](https://github.com/jlowin/fastmcp) server that exposes the [Percepxion](https://percepxion.ai) REST API as MCP tools. Connect it to Claude Desktop, Claude Code, or any MCP-compatible client to manage out-of-band infrastructure through natural language.
 
 ## What is Percepxion?
 
@@ -15,22 +12,22 @@ This MCP server gives AI assistants direct access to Percepxion's management cap
 
 ## Use cases
 
-- Inventory discovery: find all devices in an organization, filter by model or firmware version
-- Remote CLI execution: run commands on a device and retrieve output through Percepxion
-- Config management: push individual property changes or clone a full config from a reference device
-- Firmware compliance: compare fleet firmware versions against a target and identify non-compliant devices
-- Firmware updates: upload firmware and target a Smart Group for coordinated rollout
-- Log retrieval: pull syslogs or access logs from devices on demand
-- Audit investigation: search platform audit records by user, time range, or action
-- Tenant management: list organizations and scope operations to specific tenants
+- **Inventory discovery**, find all devices in an organization, filter by model or firmware version
+- **Remote CLI execution**, run commands on a device and retrieve output through Percepxion
+- **Config management**, push individual property changes or clone a full config from a reference device
+- **Firmware compliance**, compare fleet firmware against a target and identify non-compliant devices
+- **Firmware updates**, upload firmware and target a Smart Group for coordinated rollout
+- **Log retrieval**, pull syslogs or access logs from devices on demand
+- **Audit investigation**, search platform audit records by user, time range, or action
+- **Tenant management**, list organizations and scope operations to specific tenants
 
 ---
 
 ## How it works
 
-The server runs locally and communicates with the Percepxion API over HTTPS. Authentication uses username/password, the server exchanges these for session tokens and holds them in memory for the lifetime of the process.
+The server runs locally and communicates with the Percepxion API over HTTPS. Authentication uses username/password; the server exchanges these for session tokens and holds them in memory for the lifetime of the process.
 
-Many Percepxion operations are asynchronous. Tools that trigger device actions (CLI commands, config pushes, firmware updates, syslog requests) create a Percepxion job group and return the job record. Use `search_job_groups` to poll job status and retrieve results.
+Many Percepxion operations are asynchronous. Tools that trigger device actions (CLI commands, config pushes, firmware updates, syslog requests) create a Percepxion job group and return the job record. Use `search_job_groups` or `get_job_group` to poll status and retrieve results.
 
 **Response envelope, all tools return this structure:**
 
@@ -47,7 +44,7 @@ Many Percepxion operations are asynchronous. Tools that trigger device actions (
 ## Prerequisites
 
 - Python 3.11 or later (3.12 recommended)
-- Network access to your Percepxion API base URL
+- Network access to your Percepxion API endpoint
 - A Percepxion username and password with appropriate permissions
 
 ---
@@ -57,16 +54,17 @@ Many Percepxion operations are asynchronous. Tools that trigger device actions (
 ### Linux or WSL
 
 ```bash
-git clone https://github.com/keelhaulin/percepxion-MCP-Server.git
-cd percepxion-MCP-Server
+git clone https://github.com/Lantronix/percepxion-mcp-server.git
+cd percepxion-mcp-server
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
 pip install -e .
 
 cp .env.example .env
-# Edit .env, set PERCEPXION_USERNAME, PERCEPXION_PASSWORD, PERCEPXION_API_URL
+# Edit .env, set PERCEPXION_USERNAME, PERCEPXION_PASSWORD
+# Default API URL is https://api.percepxion.ai/api
+# Lantronix employees: use https://api.gopercepxion.ai/api for the internal sandbox
 ```
 
 Test the server starts:
@@ -92,21 +90,46 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 |---|---|---|---|
 | `PERCEPXION_USERNAME` | Yes |, | Percepxion login username |
 | `PERCEPXION_PASSWORD` | Yes |, | Percepxion login password |
-| `PERCEPXION_API_URL` | Yes | `https://api.gopercepxion.ai/api` | Percepxion API base URL |
+| `PERCEPXION_API_URL` | No | `https://api.percepxion.ai/api` | Percepxion API base URL. Use `https://api.gopercepxion.ai/api` for the Lantronix internal sandbox. |
+| `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Default tenant ID used when callers omit `tenant_id`. Useful for single-tenant deployments. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
+| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, or `aws`. |
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
 
-### Credential Providers
+### CLI command policy
 
-By default, the server reads credentials from environment variables in `.env`. You can also store credentials in HashiCorp Vault or AWS Secrets Manager.
+`send_direct_cli_command` is **read-only by default**. Only `show`, `get`, `ping`, `traceroute`, and similar read commands are allowed. Configure write access and filtering in `.env`:
 
-Set `PERCEPXION_CREDENTIAL_PROVIDER` to one of:
+| Variable | Default | Description |
+|---|---|---|
+| `PERCEPXION_CLI_WRITE_ENABLED` | `false` | Set to `true` to allow write commands (`set`, `configure`, etc.). |
+| `PERCEPXION_CLI_YOLO` | `false` | Set to `true` to disable all command filtering. Use with extreme caution. |
+| `PERCEPXION_CLI_MAX_LENGTH` | `512` | Maximum command length in characters. |
+| `PERCEPXION_CLI_DENY_COMMANDS` |, | Comma-separated commands to block in addition to built-in defaults (reload, factory-reset, write erase, etc.). |
+| `PERCEPXION_CLI_PERMIT_COMMANDS` |, | Comma-separated explicit allowlist. If set, only matching commands (and their subcommands) are permitted. |
 
-- `env` (default): Read from `PERCEPXION_USERNAME` and `PERCEPXION_PASSWORD` env vars
-- `vault`: Fetch credentials from HashiCorp Vault
-- `aws`: Fetch credentials from AWS Secrets Manager
+### Credential providers
+
+By default, credentials are read from environment variables. Two additional backends are available:
+
+**HashiCorp Vault:**
+```
+PERCEPXION_CREDENTIAL_PROVIDER=vault
+VAULT_ADDR=https://vault.example.com
+VAULT_TOKEN=hvs.XXXX
+VAULT_SECRET_PATH=secret/data/percepxion
+```
+
+**AWS Secrets Manager:**
+```
+PERCEPXION_CREDENTIAL_PROVIDER=aws
+AWS_SECRET_NAME=percepxion/credentials
+AWS_REGION=us-east-1
+```
+
+Install the AWS extra: `pip install -e ".[aws]"`
 
 Full setup details in [`config/setup-instructions.md`](config/setup-instructions.md).
 
@@ -116,10 +139,8 @@ Full setup details in [`config/setup-instructions.md`](config/setup-instructions
 
 ### Claude Code (recommended)
 
-Add the server to your Claude Code MCP configuration:
-
 ```bash
-claude mcp add percepxion -- /path/to/percepxion-MCP-Server/.venv/bin/python /path/to/percepxion-MCP-Server/percepxion_mcp.py
+claude mcp add percepxion -- /path/to/percepxion-mcp-server/.venv/bin/python /path/to/percepxion-mcp-server/percepxion_mcp.py
 ```
 
 Or add manually to `~/.claude/settings.json`:
@@ -128,9 +149,13 @@ Or add manually to `~/.claude/settings.json`:
 {
   "mcpServers": {
     "percepxion": {
-      "command": "/path/to/percepxion-MCP-Server/.venv/bin/python",
-      "args": ["/path/to/percepxion-MCP-Server/percepxion_mcp.py"],
-      "env": { "PYTHONUNBUFFERED": "1" }
+      "command": "/path/to/.venv/bin/python",
+      "args": ["/path/to/percepxion-mcp-server/percepxion_mcp.py"],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PERCEPXION_USERNAME": "your-email@example.com",
+        "PERCEPXION_PASSWORD": "your-password"
+      }
     }
   }
 }
@@ -138,18 +163,18 @@ Or add manually to `~/.claude/settings.json`:
 
 ### Claude Desktop (Linux or macOS)
 
-Copy `config/claude_desktop_config.example.json` and fill in your paths. The file goes in:
+Copy `config/claude_desktop_config.example.json`, fill in your paths, and place it at:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
 
-### Claude Desktop (Windows calling WSL)
+### Claude Desktop (Windows + WSL)
 
-Use `config/claude_desktop_config.wsl_windows.example.json`. Replace `<PATH_TO_REPO_IN_WSL>` with the WSL path to this repo (e.g. `/home/youruser/percepxion-MCP-Server`).
+Use `config/claude_desktop_config.wsl_windows.example.json`. Replace the path placeholder with the WSL path to this repo.
 
 ### First connection check
 
-Once connected, verify the integration:
+Once connected:
 
 1. Call `login_with_env`
 2. Call `get_device_list` with `search_query: "*"`
@@ -160,15 +185,16 @@ If `get_device_list` returns devices, the server is working.
 
 ## Tool reference
 
-Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
+Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 
-**Session must be established with `login_with_env` before calling any other tool.**
+**Call `login_with_env` before any other tool.** The session persists for the lifetime of the process. On a 401 response, call `login_with_env` again.
 
-### Authentication
+### Authentication and credentials
 
 | Tool | Description |
 |---|---|
-| `login_with_env` | Authenticate using credentials from `.env`. Call once per session. |
+| `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
+| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`) and clear the current session. |
 
 ### Tenant management
 
@@ -180,66 +206,66 @@ Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
 
 | Tool | Description |
 |---|---|
-| `get_device_list` | Search and paginate the device inventory. Accepts `tenant_id` for org scoping. |
+| `get_device_list` | Search and paginate the device inventory. |
 | `get_device_details` | Get full device properties by `device_id` or `serial_num`. |
-| `get_devices_by_organization` | List all devices in a specific tenant (convenience wrapper for `get_device_list`). |
+| `get_devices_by_organization` | List all devices in a specific tenant. |
 
 ### Device lifecycle
 
 | Tool | Description |
 |---|---|
-| `import_and_assign_devices` | Assign devices to a tenant. Processes each device individually and reports per-device results. |
+| `import_and_assign_devices` | Assign devices to a tenant. |
 | `unassign_devices` | Remove one or more devices from a tenant. |
-| `remove_device_from_platform` | Convenience wrapper to remove a single device. |
+| `remove_device_from_platform` | Remove a single device (convenience wrapper). |
 
 ### Smart Groups
 
 | Tool | Description |
 |---|---|
-| `create_smart_group` | Create a Smart Group using a filter query or explicit device ID list. Used to target bulk firmware and config operations. |
-| `list_smart_groups` | List Smart Groups by name filter. Returns all Smart Groups visible to your account. |
-| `delete_smart_group` | Delete a Smart Group by ID. Removes the targeting group but does not affect devices. |
+| `create_smart_group` | Create a Smart Group using a filter query or device ID list. Used to target bulk operations. |
+| `list_smart_groups` | List Smart Groups by name. |
+| `delete_smart_group` | Delete a Smart Group by ID. |
 
 ### CLI commands
 
 | Tool | Description | Async? |
 |---|---|---|
-| `send_direct_cli_command` | Send a CLI command to one device. Read-only by default; configure policy in `.env` for write commands. Commands are audit-logged to stderr. | Yes, use `search_job_groups` |
+| `send_direct_cli_command` | Send a CLI command to one device. Read-only by default (see CLI policy above). Commands are audit-logged. | Yes, use `get_job_group` |
 
 ### Device configuration
 
 | Tool | Description | Async? |
 |---|---|---|
+| `get_device_config` | Read current telemetry config before modifying it. | No |
 | `update_device_config` | Save config properties and optionally apply them immediately. | Yes if `apply_now=True` |
-| `get_device_config` | Retrieve current telemetry config properties before modifying them. | No |
-| `clone_device_config` | Copy config groups from a source device to a target device via a template. | Yes, use `search_job_groups` |
-| `list_templates` | List config templates saved in Percepxion. | No |
+| `clone_device_config` | Copy config from a source device to a target device via a template. | Yes, use `get_job_group` |
+| `list_templates` | List saved config templates. | No |
 | `delete_template` | Delete a config template by ID. | No |
+
+### Device operations
+
+| Tool | Description | Async? |
+|---|---|---|
+| `reboot_device` | Reboot a device via Percepxion. | Yes, use `get_job_group` |
+| `list_device_ports` | List serial and device ports on a device. | No |
 
 ### Firmware management
 
 | Tool | Description | Async? |
 |---|---|---|
 | `get_device_firmware_status` | Get firmware version and state for one device. | No |
-| `firmware_compliance_report` | Compare fleet firmware against an expected version. Returns compliant, non-compliant, and unknown device lists. | No |
-| `update_firmware_by_smart_group` | Upload a firmware file and apply it to devices in one or more Smart Groups. Firmware file must be on the server host. | Yes, use `search_job_groups` |
+| `firmware_compliance_report` | Compare fleet firmware against an expected version. | No |
 | `list_firmware_content` | List firmware packages already uploaded to Percepxion storage. | No |
-
-### Device operations
-
-| Tool | Description | Async? |
-|---|---|---|
-| `reboot_device` | Reboot a device via Percepxion. | Yes, use `search_job_groups` |
-| `list_device_ports` | List all serial and device ports on a device. | No |
+| `update_firmware_by_smart_group` | Upload firmware and apply to devices in one or more Smart Groups. | Yes, use `get_job_group` |
 
 ### Logging
 
 | Tool | Description | Async? |
 |---|---|---|
-| `request_device_syslog_upload` | Trigger devices to upload syslogs to Percepxion storage. | Yes, use `search_job_groups` |
-| `get_device_syslogs` | Query syslog content already uploaded to Percepxion. | No |
+| `request_device_syslog_upload` | Trigger devices to upload syslogs to Percepxion storage. | Yes, use `get_job_group` |
+| `get_device_syslogs` | Query syslog files already uploaded. | No |
 | `query_device_access_log` | Paginated query of device access log entries. | No |
-| `download_device_access_log` | Download complete access log content for one device. | No |
+| `download_device_access_log` | Download complete access log for one device. | No |
 
 ### Security and audit
 
@@ -253,31 +279,19 @@ Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
 
 | Tool | Description |
 |---|---|
-| `search_job_groups` | Poll async job status. Use after any tool that returns a job group record. |
+| `search_job_groups` | Search and poll async job status by name prefix. |
 | `get_job_group` | Get full job output and results by job group ID. |
 
-### Credentials
+### Async job workflow
 
-| Tool | Description |
-|---|---|
-| `reconfigure_credentials` | Switch credential provider at runtime (env, vault, or aws). |
-
-### Job tracking workflow
-
-When a tool creates a job, it returns a job group record immediately. The device operation continues asynchronously. To get results:
+When a tool creates a job, it returns a job group record immediately:
 
 ```
 1. Call the action tool (e.g. send_direct_cli_command)
-   → Returns: { "ok": true, "data": { "job_group_id": "...", "name": "CLI_abc_1742900000" } }
+   → Returns: { "ok": true, "data": { "id": "jg-abc123", "name": "CLI_dev001_1748000000" } }
 
-2. Call search_job_groups with the job name or ID
-   → Returns: job status, output, and per-device results
-```
-
-Example for a CLI command:
-
-```json
-{ "search_string": "CLI_abc", "job_type": "command", "subtype": "cli", "limit": 5 }
+2. Call get_job_group with the id
+   → Returns: full job output, per-device results, and status
 ```
 
 Job names include a Unix timestamp suffix to avoid collisions when multiple jobs run against the same device.
@@ -286,30 +300,33 @@ Job names include a Unix timestamp suffix to avoid collisions when multiple jobs
 
 ## Security
 
-This server executes operations on production network infrastructure. Treat it accordingly.
+This server executes operations on network infrastructure. Treat it accordingly.
 
 **Credentials:**
-- Keep `.env` outside of version control. The `.gitignore` in this repo excludes it.
-- Set file permissions to `600`: `chmod 600 .env`
-- Use a dedicated Percepxion service account with the minimum permissions required for your use case. Do not use an admin account for automated or agent-driven workflows.
+- Keep `.env` out of version control (it's in `.gitignore`).
+- Set file permissions: `chmod 600 .env`
+- Use a dedicated Percepxion service account with minimum required permissions. Do not use an admin account for automated workflows.
+- For team environments, use the Vault or AWS Secrets Manager providers instead of plaintext `.env` files.
 
-**CLI command execution:**
-- `send_direct_cli_command` sends arbitrary CLI commands to devices through Percepxion. There is no command allowlist in the server. A session with this MCP tool can reconfigure or reset devices.
-- All CLI commands dispatched through the server are logged to stderr with the device ID and command string for audit purposes.
-- In production or shared environments, restrict who can start the MCP server process.
+**CLI command policy:**
+- `send_direct_cli_command` is **read-only by default**. Only recognized read commands (`show`, `get`, `ping`, etc.) pass through.
+- A built-in deny list blocks destructive operations (`reload`, `factory-reset`, `write erase`, `erase startup-config`, etc.) even when write mode is enabled.
+- Set `PERCEPXION_CLI_WRITE_ENABLED=true` to allow write commands. All dispatched commands are logged to stderr with device ID and command string.
+- Set `PERCEPXION_CLI_DENY_COMMANDS` to add custom blocked commands. Set `PERCEPXION_CLI_PERMIT_COMMANDS` for an explicit allowlist.
+- `PERCEPXION_CLI_YOLO=true` disables all filtering. Use only in trusted, isolated environments.
 
 **Firmware uploads:**
 - `update_firmware_by_smart_group` reads a local file path and uploads it to Percepxion.
-- Set `PERCEPXION_FIRMWARE_DIR` to restrict uploads to a specific directory. Without this variable, any file the server process can read can be uploaded.
+- Set `PERCEPXION_FIRMWARE_DIR` to restrict uploads to a specific directory. Without this, any file the server process can read can be uploaded.
 
 **Token handling:**
 - Auth tokens are stored in memory only and are never written to disk.
-- On a 401 response, the session is cleared automatically. Re-run `login_with_env` to restore the session.
+- On a 401 response, the session is cleared automatically. Call `login_with_env` again to restore.
 - There is no automatic token refresh. Long-running workflows should handle 401 responses and re-authenticate.
 
 **Network:**
 - The server communicates with Percepxion over HTTPS only.
-- Verify `PERCEPXION_API_URL` points to the correct Percepxion instance before running in any automated context.
+- The default endpoint is `api.percepxion.ai`. The Lantronix internal sandbox is `api.gopercepxion.ai`. Verify `PERCEPXION_API_URL` before running in any automated context.
 
 ---
 
@@ -319,10 +336,34 @@ This server executes operations on production network infrastructure. Treat it a
 |---|---|---|
 | "Not authenticated" | `login_with_env` not called or token expired | Call `login_with_env` |
 | `401` on any tool | Token expired mid-session | Call `login_with_env` again |
-| All calls fail or time out | Wrong `PERCEPXION_API_URL` | Check the URL in `.env` |
+| All calls fail or time out | Wrong `PERCEPXION_API_URL` | Check `.env`, production is `api.percepxion.ai`, sandbox is `api.gopercepxion.ai` |
 | Slow log downloads time out | Default 45s timeout too short | Set `PERCEPXION_REQUEST_TIMEOUT=120` |
 | Firmware upload rejected | File outside `PERCEPXION_FIRMWARE_DIR` | Move file to allowed directory or unset the variable |
+| "Write commands are disabled" | CLI policy in read-only mode | Set `PERCEPXION_CLI_WRITE_ENABLED=true` in `.env` |
+| "Command is in the deny list" | Built-in deny list blocks the command | Set `PERCEPXION_CLI_YOLO=true` to bypass (use with caution) |
 | Server exits immediately | Python path or venv issue | Run `python percepxion_mcp.py` directly to see the error |
+
+---
+
+## Contributing
+
+The project uses a feature branch workflow:
+
+```bash
+git checkout -b feat/your-feature
+# make changes
+git push -u origin feat/your-feature
+# open a pull request to main
+```
+
+Run the test suite before submitting:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+See [`docs/adding-new-tools.md`](docs/adding-new-tools.md) for conventions on adding new tools to the server.
 
 ---
 
@@ -330,6 +371,7 @@ This server executes operations on production network infrastructure. Treat it a
 
 - [`docs/tools.md`](docs/tools.md), full tool reference with API endpoint mapping
 - [`docs/adding-new-tools.md`](docs/adding-new-tools.md), conventions for adding tools to this server
+- [`config/setup-instructions.md`](config/setup-instructions.md), detailed setup for all OS and credential provider combinations
 - [`docs/claude-example.prompt`](docs/claude-example.prompt), starter system prompt for Claude Desktop sessions
 
 ---
