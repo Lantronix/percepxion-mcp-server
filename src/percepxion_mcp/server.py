@@ -346,26 +346,6 @@ def create_smart_group(
 
 
 @mcp.tool()
-def automate_smart_group(
-    name: str,
-    query: str | None = None,
-    device_ids: list[str] | None = None,
-    description: str = "",
-    temporary: bool = False,
-    tenant_id: str | None = None,
-) -> dict[str, Any]:
-    """Deprecated alias for create_smart_group. Use create_smart_group instead."""
-    return create_smart_group(
-        name=name,
-        query=query,
-        device_ids=device_ids,
-        description=description,
-        temporary=temporary,
-        tenant_id=tenant_id,
-    )
-
-
-@mcp.tool()
 def send_direct_cli_command(device_id: str, command: str, description: str = "Triggered via MCP", tenant_id: str | None = None) -> dict[str, Any]:
     """
     Send a CLI command to one device via a Percepxion job group.
@@ -395,12 +375,6 @@ def send_direct_cli_command(device_id: str, command: str, description: str = "Tr
     if effective_tenant_id:
         payload["tenant_id"] = effective_tenant_id
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
-
-
-@mcp.tool()
-def send_cli_command(device_id: str, command: str) -> dict[str, Any]:
-    """Deprecated alias for send_direct_cli_command. Use send_direct_cli_command instead."""
-    return send_direct_cli_command(device_id=device_id, command=command)
 
 
 @mcp.tool()
