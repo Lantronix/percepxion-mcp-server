@@ -98,6 +98,18 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
 
+### Credential Providers
+
+By default, the server reads credentials from environment variables in `.env`. You can also store credentials in HashiCorp Vault or AWS Secrets Manager.
+
+Set `PERCEPXION_CREDENTIAL_PROVIDER` to one of:
+
+- `env` (default): Read from `PERCEPXION_USERNAME` and `PERCEPXION_PASSWORD` env vars
+- `vault`: Fetch credentials from HashiCorp Vault
+- `aws`: Fetch credentials from AWS Secrets Manager
+
+Full setup details in [`config/setup-instructions.md`](config/setup-instructions.md).
+
 ---
 
 ## Connect an MCP client
@@ -185,19 +197,24 @@ Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
 | Tool | Description |
 |---|---|
 | `create_smart_group` | Create a Smart Group using a filter query or explicit device ID list. Used to target bulk firmware and config operations. |
+| `list_smart_groups` | List Smart Groups by name filter. Returns all Smart Groups visible to your account. |
+| `delete_smart_group` | Delete a Smart Group by ID. Removes the targeting group but does not affect devices. |
 
 ### CLI commands
 
 | Tool | Description | Async? |
 |---|---|---|
-| `send_direct_cli_command` | Send a CLI command to one device. Commands are audit-logged to stderr. | Yes, use `search_job_groups` |
+| `send_direct_cli_command` | Send a CLI command to one device. Read-only by default; configure policy in `.env` for write commands. Commands are audit-logged to stderr. | Yes, use `search_job_groups` |
 
 ### Device configuration
 
 | Tool | Description | Async? |
 |---|---|---|
 | `update_device_config` | Save config properties and optionally apply them immediately. | Yes if `apply_now=True` |
+| `get_device_config` | Retrieve current telemetry config properties before modifying them. | No |
 | `clone_device_config` | Copy config groups from a source device to a target device via a template. | Yes, use `search_job_groups` |
+| `list_templates` | List config templates saved in Percepxion. | No |
+| `delete_template` | Delete a config template by ID. | No |
 
 ### Firmware management
 
@@ -206,6 +223,14 @@ Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
 | `get_device_firmware_status` | Get firmware version and state for one device. | No |
 | `firmware_compliance_report` | Compare fleet firmware against an expected version. Returns compliant, non-compliant, and unknown device lists. | No |
 | `update_firmware_by_smart_group` | Upload a firmware file and apply it to devices in one or more Smart Groups. Firmware file must be on the server host. | Yes, use `search_job_groups` |
+| `list_firmware_content` | List firmware packages already uploaded to Percepxion storage. | No |
+
+### Device operations
+
+| Tool | Description | Async? |
+|---|---|---|
+| `reboot_device` | Reboot a device via Percepxion. | Yes, use `search_job_groups` |
+| `list_device_ports` | List all serial and device ports on a device. | No |
 
 ### Logging
 
@@ -229,6 +254,13 @@ Full reference in [`docs/tools.md`](docs/tools.md). Quick summary below.
 | Tool | Description |
 |---|---|
 | `search_job_groups` | Poll async job status. Use after any tool that returns a job group record. |
+| `get_job_group` | Get full job output and results by job group ID. |
+
+### Credentials
+
+| Tool | Description |
+|---|---|
+| `reconfigure_credentials` | Switch credential provider at runtime (env, vault, or aws). |
 
 ### Job tracking workflow
 
