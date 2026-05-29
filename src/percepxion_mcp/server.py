@@ -665,7 +665,7 @@ def update_firmware_by_smart_group(
         return _err(f"Firmware path is not a file: {firmware_file_path}")
     if FIRMWARE_DIR:
         allowed = Path(FIRMWARE_DIR).resolve()
-        if not str(firmware_path).startswith(str(allowed)):
+        if not firmware_path.is_relative_to(allowed):
             return _err(
                 f"Firmware file is outside the allowed directory ({FIRMWARE_DIR}). "
                 "Set PERCEPXION_FIRMWARE_DIR to the directory containing your firmware files."
