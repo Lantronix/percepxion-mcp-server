@@ -6,7 +6,10 @@
         "percepxion_mcp.py"
       ],
       "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "PERCEPXION_API_URL": "https://api.percepxion.ai/api",
+        "PERCEPXION_USERNAME": "your-email@example.com",
+        "PERCEPXION_PASSWORD": "your-password"
       }
     }
   }

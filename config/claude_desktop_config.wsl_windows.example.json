@@ -5,10 +5,13 @@
       "args": [
         "bash",
         "-lc",
-        "cd <PATH_TO_REPO_IN_WSL> && .venv/bin/python percepxion_mcp.py"
+        "cd /path/to/percepxion-mcp-server && .venv/bin/python percepxion_mcp.py"
       ],
       "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "PERCEPXION_API_URL": "https://api.percepxion.ai/api",
+        "PERCEPXION_USERNAME": "your-email@example.com",
+        "PERCEPXION_PASSWORD": "your-password"
       }
     }
   }
