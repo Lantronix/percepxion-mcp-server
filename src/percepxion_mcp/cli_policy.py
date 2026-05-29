@@ -103,7 +103,7 @@ def check_command(
     normalized = _normalize(command)
 
     for denied in deny:
-        if normalized == denied or normalized.startswith(denied + " ") or normalized.endswith(" " + denied):
+        if normalized == denied or normalized.startswith(denied + " "):
             raise CLIPolicyViolation(
                 f"Command '{command}' is in the deny list. "
                 "Set PERCEPXION_CLI_YOLO=true to bypass (use with caution)."
@@ -116,7 +116,11 @@ def check_command(
         )
 
     if _permit:
-        if normalized not in {p.lower() for p in _permit}:
+        permit_normalized = {p.strip().lower() for p in _permit}
+        if not any(
+            normalized == p or normalized.startswith(p + " ")
+            for p in permit_normalized
+        ):
             raise CLIPolicyViolation(
                 f"Command '{command}' is not in the permit list. "
                 "Update PERCEPXION_CLI_PERMIT_COMMANDS or clear it to allow all non-denied commands."

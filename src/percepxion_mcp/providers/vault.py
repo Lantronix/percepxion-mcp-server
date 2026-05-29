@@ -13,7 +13,7 @@ class VaultProvider(CredentialProvider):
         self.path = os.getenv("VAULT_SECRET_PATH", "secret/data/percepxion")
 
     def get_credentials(self) -> Credentials:
-        url = f"{self.addr.rstrip('/')}/v1/{self.path}"
+        url = f"{self.addr.rstrip('/')}/v1/{self.path.lstrip('/')}"
         resp = requests.get(
             url,
             headers={"X-Vault-Token": self.token},

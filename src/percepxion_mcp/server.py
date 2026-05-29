@@ -10,7 +10,6 @@ from fastmcp import FastMCP
 from .config import (
     FIRMWARE_DIR,
     DEFAULT_TENANT_ID,
-    CREDENTIAL_PROVIDER,
 )
 from .client import (
     session,
@@ -41,13 +40,15 @@ def login_with_env() -> dict[str, Any]:
     - vault: reads from HashiCorp Vault (requires VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH)
     - aws: reads from AWS Secrets Manager (requires AWS_SECRET_NAME, AWS_REGION)
     """
+    import os
     from .providers import get_provider
 
+    credential_provider = os.getenv("PERCEPXION_CREDENTIAL_PROVIDER", "env")
     try:
-        provider = get_provider(CREDENTIAL_PROVIDER)
+        provider = get_provider(credential_provider)
         creds = provider.get_credentials()
     except Exception as exc:
-        return _err(f"Failed to load credentials from provider '{CREDENTIAL_PROVIDER}': {exc}")
+        return _err(f"Failed to load credentials from provider '{credential_provider}': {exc}")
 
     resp = _api_post(
         "/v2/user/login",
@@ -65,7 +66,7 @@ def login_with_env() -> dict[str, Any]:
 
     session.auth_token = token
     session.csrf_token = csrf
-    logger.info("Authenticated via %s provider", CREDENTIAL_PROVIDER)
+    logger.info("Authenticated via %s provider", credential_provider)
     return _ok({"message": "Authenticated successfully.", "username": creds["username"]})
 
 

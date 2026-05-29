@@ -131,6 +131,32 @@ def test_permit_list_blocks_unlisted_command():
         )
 
 
+def test_permit_list_allows_prefix_match():
+    # "show" in permit list should allow "show interfaces"
+    check_command(
+        "show interfaces",
+        write_enabled=True,
+        yolo_mode=False,
+        permit_list=frozenset({"show"}),
+    )
+
+
+def test_permit_list_prefix_does_not_allow_unrelated_command():
+    with pytest.raises(CLIPolicyViolation, match="not in the permit list"):
+        check_command(
+            "set hostname mydevice",
+            write_enabled=True,
+            yolo_mode=False,
+            permit_list=frozenset({"show"}),
+        )
+
+
+def test_shutdown_suffix_not_blocked_by_deny_list():
+    # "no shutdown" should NOT be blocked, "shutdown" is in deny list
+    # but endswith check was removed; only exact match and startswith apply
+    check_command("no shutdown", write_enabled=True, yolo_mode=False)
+
+
 # --- deny list constants ---
 
 def test_default_deny_contains_expected_commands():
