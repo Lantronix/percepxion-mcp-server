@@ -1,16 +1,22 @@
 import json
 import logging
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-load_dotenv()
+from .config import (
+    API_BASE_URL,
+    USERNAME,
+    PASSWORD,
+    REQUEST_TIMEOUT,
+    FIRMWARE_DIR,
+    DEFAULT_TENANT_ID,
+    CREDENTIAL_PROVIDER,
+)
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -20,15 +26,6 @@ logging.basicConfig(
 logger = logging.getLogger("percepxion_mcp")
 
 mcp = FastMCP("Percepxion-Server")
-
-API_BASE_URL = os.getenv("PERCEPXION_API_URL", "https://api.percepxion.ai/api").rstrip("/")
-USER = os.getenv("PERCEPXION_USERNAME")
-PASSWORD = os.getenv("PERCEPXION_PASSWORD")
-REQUEST_TIMEOUT_SECONDS = int(os.getenv("PERCEPXION_REQUEST_TIMEOUT", "45"))
-# If set, firmware uploads are restricted to files within this directory.
-FIRMWARE_DIR = os.getenv("PERCEPXION_FIRMWARE_DIR")
-# If set, used as fallback tenant_id for CLI job commands when none is supplied by the caller.
-DEFAULT_TENANT_ID = os.getenv("PERCEPXION_DEFAULT_TENANT_ID")
 
 
 class PercepxionSession:
@@ -126,7 +123,7 @@ def _api_post(
             json=json_body,
             data=form_data,
             files=files,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=REQUEST_TIMEOUT,
         )
     except requests.RequestException as exc:
         logger.error("Request failed for %s: %s", path, exc)
@@ -146,12 +143,12 @@ def _api_post(
 @mcp.tool()
 def login_with_env() -> dict[str, Any]:
     """Authenticate using PERCEPXION_USERNAME and PERCEPXION_PASSWORD from .env."""
-    if not USER or not PASSWORD:
+    if not USERNAME or not PASSWORD:
         return _err("Missing PERCEPXION_USERNAME or PERCEPXION_PASSWORD in .env.")
 
     resp = _api_post(
         "/v2/user/login",
-        json_body={"username": USER, "password": PASSWORD},
+        json_body={"username": USERNAME, "password": PASSWORD},
         require_auth=False,
     )
     if not resp["ok"]:
@@ -165,8 +162,8 @@ def login_with_env() -> dict[str, Any]:
 
     session.auth_token = token
     session.csrf_token = csrf
-    logger.info("Authenticated as %s", USER)
-    return _ok({"message": "Authenticated successfully.", "username": USER})
+    logger.info("Authenticated as %s", USERNAME)
+    return _ok({"message": "Authenticated successfully.", "username": USERNAME})
 
 
 @mcp.tool()
