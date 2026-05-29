@@ -21,7 +21,7 @@ logger = logging.getLogger("percepxion_mcp")
 
 mcp = FastMCP("Percepxion-Server")
 
-API_BASE_URL = os.getenv("PERCEPXION_API_URL", "https://api.gopercepxion.ai/api").rstrip("/")
+API_BASE_URL = os.getenv("PERCEPXION_API_URL", "https://api.percepxion.ai/api").rstrip("/")
 USER = os.getenv("PERCEPXION_USERNAME")
 PASSWORD = os.getenv("PERCEPXION_PASSWORD")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PERCEPXION_REQUEST_TIMEOUT", "45"))
@@ -134,7 +134,7 @@ def _api_post(
 
     payload = _extract_json(response)
     if response.status_code == 401:
-        logger.warning("Token expired for %s — session cleared", path)
+        logger.warning("Token expired for %s, session cleared", path)
         session.clear()
         return _err("Unauthorized or token expired. Run login_with_env again.", 401, payload)
     if response.status_code >= 400:
@@ -239,7 +239,7 @@ def list_tenants(
         limit: Number of results to return (1-1000).
         offset: Pagination offset.
         sort: Field to sort by (default: 'name').
-        order: Sort direction — 'asc' or 'desc'.
+        order: Sort direction, 'asc' or 'desc'.
     """
     payload: dict[str, Any] = {
         "search_string": search_query,
@@ -380,7 +380,7 @@ def send_direct_cli_command(device_id: str, command: str, description: str = "Tr
         tenant_id: Tenant/org scope required for tenant-owned devices. Falls back
                    to PERCEPXION_DEFAULT_TENANT_ID env var if not supplied.
     """
-    logger.info("CLI command dispatched — device_id=%s command=%r", device_id, command)
+    logger.info("CLI command dispatched, device_id=%s command=%r", device_id, command)
     effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
     payload = {
         "name": f"CLI_{device_id[:12]}_{int(time.time())}",
