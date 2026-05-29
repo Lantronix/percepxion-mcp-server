@@ -275,6 +275,51 @@ def create_smart_group(
 
 
 @mcp.tool()
+def list_smart_groups(
+    search_query: str = "*",
+    limit: int = 50,
+    offset: int = 0,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List Smart Groups visible to the authenticated user.
+
+    Use this to find existing group IDs before targeting firmware updates or config pushes.
+
+    Args:
+        search_query: Filter by name. Use '*' for all.
+        limit: Number of results (1-1000).
+        offset: Pagination offset.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {
+        "search_string": search_query,
+        "offset": max(0, offset),
+        "limit": min(max(1, limit), 1000),
+    }
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v3/device/smartgroup/search", json_body=payload)
+
+
+@mcp.tool()
+def delete_smart_group(smart_group_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+    """
+    Delete a Smart Group by ID.
+
+    Use this to clean up temporary groups created for one-off operations.
+
+    Args:
+        smart_group_id: The ID of the Smart Group to delete.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {"id": smart_group_id}
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v3/device/smartgroup/delete", json_body=payload)
+
+
+@mcp.tool()
 def send_direct_cli_command(
     device_id: str,
     command: str,
@@ -475,6 +520,59 @@ def get_device_firmware_status(device_id: str, tenant_id: str | None = None) -> 
 
 
 @mcp.tool()
+def reboot_device(
+    device_id: str,
+    description: str = "Reboot requested via MCP",
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Request a device reboot via a Percepxion job group.
+
+    The operation is asynchronous. Use get_job_group or search_job_groups to check status.
+
+    Args:
+        device_id: Percepxion device ID (from get_device_list).
+        description: Label stored in the job group record.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {
+        "name": f"Reboot_{device_id[:12]}_{int(time.time())}",
+        "description": description,
+        "type": "command",
+        "subtype": "action",
+        "op_code": "execute",
+        "operation": "reboot",
+        "device_id": [device_id],
+        "enable": True,
+    }
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/job/jobgroup/create", json_body=payload)
+
+
+@mcp.tool()
+def get_device_config(
+    device_id: str,
+    selected: bool = True,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Read the current telemetry config for a device from Percepxion.
+
+    Use this to inspect current settings before calling update_device_config.
+
+    Args:
+        device_id: Percepxion device ID (from get_device_list).
+        selected: If True, return only the user-selected config items.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/telemetry/config/get", json_body=payload)
+
+
+@mcp.tool()
 def request_device_syslog_upload(
     device_ids: list[str],
     log_type: str = "all",
@@ -646,6 +744,86 @@ def update_firmware_by_smart_group(
 
 
 @mcp.tool()
+def list_firmware_content(
+    search_query: str = "*",
+    limit: int = 50,
+    offset: int = 0,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List firmware packages already uploaded to Percepxion.
+
+    Use this to check what firmware is available before calling update_firmware_by_smart_group.
+
+    Args:
+        search_query: Filter by firmware name. Use '*' for all.
+        limit: Number of results (1-1000).
+        offset: Pagination offset.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {
+        "search_string": search_query,
+        "type": "firmware",
+        "offset": max(0, offset),
+        "limit": min(max(1, limit), 1000),
+    }
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v3/content/search", json_body=payload)
+
+
+@mcp.tool()
+def list_templates(
+    search_query: str = "*",
+    device_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List config templates stored in Percepxion.
+
+    Use this before delete_template or clone_device_config to find existing template names and IDs.
+
+    Args:
+        search_query: Filter by template name. Use '*' for all.
+        device_id: Filter templates associated with a specific source device.
+        limit: Number of results (1-1000).
+        offset: Pagination offset.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {
+        "search_string": search_query,
+        "offset": max(0, offset),
+        "limit": min(max(1, limit), 1000),
+        "sort": "name",
+        "order": "asc",
+    }
+    if device_id:
+        payload["device_id"] = [device_id]
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/telemetry/template/search", json_body=payload)
+
+
+@mcp.tool()
+def delete_template(template_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+    """
+    Delete a config template by ID.
+
+    Use list_templates to find the template ID before deleting.
+
+    Args:
+        template_id: The ID of the config template to delete.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {"id": template_id}
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/telemetry/template/delete", json_body=payload)
+
+
+@mcp.tool()
 def search_job_groups(
     search_string: str = "",
     job_type: str = "command",
@@ -667,6 +845,24 @@ def search_job_groups(
     if effective_tenant_id:
         payload["tenant_id"] = effective_tenant_id
     return _api_post("/v1/job/jobgroup/search", json_body=payload)
+
+
+@mcp.tool()
+def get_job_group(job_group_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+    """
+    Get full details and output for a specific job group by ID.
+
+    Use this after search_job_groups to retrieve complete job output once you have the ID.
+    More reliable than polling by name when multiple jobs share a name prefix.
+
+    Args:
+        job_group_id: The job group ID returned by create operations or search_job_groups.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {"id": job_group_id}
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/job/jobgroup/get", json_body=payload)
 
 
 @mcp.tool()
@@ -694,6 +890,35 @@ def download_device_access_log(device_id: str, log_level: str = "info") -> dict[
         "log_level": log_level,
     }
     return _api_post("/v1/storage/file/devicelog/download", json_body=payload)
+
+
+@mcp.tool()
+def list_device_ports(
+    device_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List serial/device ports on a Percepxion-managed device.
+
+    Returns port names, numbers, and connection state. Use the port data to
+    identify targets for serial session access.
+
+    Args:
+        device_id: Percepxion device ID (from get_device_list).
+        limit: Number of results (1-1000).
+        offset: Pagination offset.
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {
+        "device_id": device_id,
+        "offset": max(0, offset),
+        "limit": min(max(1, limit), 1000),
+    }
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/device/port/search", json_body=payload)
 
 
 @mcp.tool()
