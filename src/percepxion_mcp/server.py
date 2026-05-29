@@ -21,6 +21,7 @@ from .client import (
     _err,
     _resolve_tenant,
 )
+from .cli_policy import check_command, CLIPolicyViolation
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -235,23 +236,42 @@ def create_smart_group(
 
 
 @mcp.tool()
-def send_direct_cli_command(device_id: str, command: str, description: str = "Triggered via MCP", tenant_id: str | None = None) -> dict[str, Any]:
+def send_direct_cli_command(
+    device_id: str,
+    command: str,
+    description: str = "Triggered via MCP",
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
     """
     Send a CLI command to one device via a Percepxion job group.
 
-    The command runs asynchronously. Use search_job_groups to retrieve output.
+    Commands run asynchronously. Use search_job_groups to retrieve output.
     Commands are logged to stderr for audit purposes.
+
+    Policy (configured via env vars):
+    - Read-only by default (PERCEPXION_CLI_WRITE_ENABLED=false).
+      Only 'show', 'get', 'ping', 'traceroute', and similar read commands are allowed.
+    - Set PERCEPXION_CLI_WRITE_ENABLED=true to allow write commands.
+    - A built-in deny list blocks destructive commands (reload, factory-reset, write erase, etc.)
+      even when write is enabled.
+    - Set PERCEPXION_CLI_DENY_COMMANDS (comma-separated) to add custom denied commands.
+    - Set PERCEPXION_CLI_PERMIT_COMMANDS (comma-separated) for an explicit allowlist.
+    - Set PERCEPXION_CLI_YOLO=true to disable all filtering (use with extreme caution).
 
     Args:
         device_id: Percepxion device ID (from get_device_list).
         command: CLI command string to execute on the device.
         description: Human-readable label stored in the job group record.
-        tenant_id: Tenant/org scope required for tenant-owned devices. Falls back
-                   to PERCEPXION_DEFAULT_TENANT_ID env var if not supplied.
+        tenant_id: Tenant/org scope. Falls back to PERCEPXION_DEFAULT_TENANT_ID.
     """
+    try:
+        check_command(command)
+    except CLIPolicyViolation as exc:
+        return _err(str(exc))
+
     logger.info("CLI command dispatched, device_id=%s command=%r", device_id, command)
-    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
-    payload = {
+    effective_tenant_id = _resolve_tenant(tenant_id)
+    payload: dict[str, Any] = {
         "name": f"CLI_{device_id[:12]}_{int(time.time())}",
         "description": description,
         "enable": True,
