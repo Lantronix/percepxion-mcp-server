@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-06-16
+
+### Fixed
+- `get_job_group`: payload key changed from `id` to `job_group_id`; the Percepxion API requires the longer key and returned a `VALIDATION_ERROR` with the old one
+- `list_device_ports`: endpoint corrected from `/v1/device/port/search` (404 in production) to `/v3/port/search`; payload key changed from `device_id` to `search_string` to match the actual API contract discovered via live network capture
+
 ## 0.4.0 - 2026-05-29
 
 ### Added

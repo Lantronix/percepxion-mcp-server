@@ -40,7 +40,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 | Firmware | `update_firmware_by_smart_group` | No | `POST /v3/content/create` (multipart) | `search_job_groups` |
 | Firmware | `list_firmware_content` | Yes | `POST /v3/content/search` | None |
 | Device Operations | `reboot_device` | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Device Ports | `list_device_ports` | Yes | `POST /v3/device/port/list` | None |
+| Device Ports | `list_device_ports` | Yes | `POST /v3/port/search` | None |
 | Logs | `request_device_syslog_upload` | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
 | Logs | `get_device_syslogs` | Yes | `POST /v1/storage/file/content/query` | None |
 | Logs | `query_device_access_log` | Yes | `POST /v1/storage/file/devicelog/query-by-id` | None |
