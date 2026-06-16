@@ -8,6 +8,7 @@ from percepxion_mcp.server import (
     update_firmware_by_smart_group,
     firmware_compliance_report,
     get_device_list,
+    get_job_group,
 )
 
 
@@ -100,6 +101,45 @@ def test_compliance_report_categorizes_devices(authed_session, httpserver):
     assert data["non_compliant_count"] == 1
     assert data["unknown_count"] == 1
     assert data["compliance_percent"] == pytest.approx(33.33, abs=0.01)
+
+
+# --- get_job_group ---
+
+def test_get_job_group_requires_auth():
+    result = get_job_group(job_group_id="jg-001")
+    assert result["ok"] is False
+    assert "login_with_env" in result["error"]
+
+
+def test_get_job_group_sends_job_group_id_key(authed_session):
+    """Regression: payload must use 'job_group_id', not 'id' (API returns VALIDATION_ERROR otherwise)."""
+    from unittest.mock import patch, MagicMock
+    import requests
+
+    mock_resp = MagicMock(spec=requests.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"job_group_id": "jg-001", "status": "completed"}
+
+    with patch("requests.post", return_value=mock_resp) as mock_post:
+        result = get_job_group(job_group_id="jg-001")
+
+    assert result["ok"] is True
+    _, kwargs = mock_post.call_args
+    sent_body = kwargs.get("json", {})
+    assert "job_group_id" in sent_body, "payload must use key 'job_group_id'"
+    assert "id" not in sent_body, "payload must not use legacy key 'id'"
+    assert sent_body["job_group_id"] == "jg-001"
+
+
+def test_get_job_group_returns_job_data(authed_session, httpserver):
+    """Happy path: get_job_group returns full job group details."""
+    job_data = {"job_group_id": "jg-002", "status": "completed", "jobs": [{"output": "show version..."}]}
+    httpserver.expect_request("/api/v1/job/jobgroup/get", method="POST").respond_with_json(job_data, status=200)
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_job_group(job_group_id="jg-002")
+    assert result["ok"] is True
+    assert result["data"]["job_group_id"] == "jg-002"
+    assert result["data"]["status"] == "completed"
 
 
 # --- get_device_list ---

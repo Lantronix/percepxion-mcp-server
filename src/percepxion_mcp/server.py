@@ -860,7 +860,7 @@ def get_job_group(job_group_id: str, tenant_id: str | None = None) -> dict[str, 
         job_group_id: The job group ID returned by create operations or search_job_groups.
         tenant_id: Scope to a specific tenant.
     """
-    payload: dict[str, Any] = {"id": job_group_id}
+    payload: dict[str, Any] = {"job_group_id": job_group_id}
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
     return _api_post("/v1/job/jobgroup/get", json_body=payload)
