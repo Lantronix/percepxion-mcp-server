@@ -9,6 +9,7 @@ from percepxion_mcp.server import (
     firmware_compliance_report,
     get_device_list,
     get_job_group,
+    list_device_ports,
 )
 
 
@@ -148,3 +149,49 @@ def test_get_device_list_requires_auth():
     result = get_device_list()
     assert result["ok"] is False
     assert "login_with_env" in result["error"]
+
+
+# --- list_device_ports ---
+
+def test_list_device_ports_requires_auth():
+    result = list_device_ports(device_id="dev-001")
+    assert result["ok"] is False
+    assert "login_with_env" in result["error"]
+
+
+def test_list_device_ports_sends_search_string_key(authed_session):
+    """Regression: payload must use 'search_string' with the device_id value, not 'device_id' key."""
+    from unittest.mock import MagicMock
+    import requests
+
+    mock_resp = MagicMock(spec=requests.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"total": 0, "result": []}
+
+    with patch("requests.post", return_value=mock_resp) as mock_post:
+        result = list_device_ports(device_id="dev-abc")
+
+    assert result["ok"] is True
+    _, kwargs = mock_post.call_args
+    sent_body = kwargs.get("json", {})
+    assert "search_string" in sent_body, "payload must use key 'search_string'"
+    assert "device_id" not in sent_body, "payload must not use legacy key 'device_id'"
+    assert sent_body["search_string"] == "dev-abc"
+
+
+def test_list_device_ports_returns_port_data(authed_session, httpserver):
+    """Happy path: list_device_ports returns paginated port records from /v3/port/search."""
+    port_data = {
+        "total": 2,
+        "result": [
+            {"name": "Port-1", "port_number": 1, "status": "Connected", "parent_device_id": "dev-xyz"},
+            {"name": "Port-2", "port_number": 2, "status": "Disconnected", "parent_device_id": "dev-xyz"},
+        ],
+    }
+    httpserver.expect_request("/api/v3/port/search", method="POST").respond_with_json(port_data, status=200)
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = list_device_ports(device_id="dev-xyz")
+    assert result["ok"] is True
+    assert result["data"]["total"] == 2
+    assert result["data"]["result"][0]["name"] == "Port-1"
+    assert result["data"]["result"][1]["status"] == "Disconnected"

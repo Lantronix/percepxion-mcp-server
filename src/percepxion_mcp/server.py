@@ -913,13 +913,15 @@ def list_device_ports(
         tenant_id: Scope to a specific tenant.
     """
     payload: dict[str, Any] = {
-        "device_id": device_id,
+        "search_string": device_id,
         "offset": max(0, offset),
         "limit": min(max(1, limit), 1000),
+        "order": "asc",
+        "sort": "name",
     }
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
-    return _api_post("/v1/device/port/search", json_body=payload)
+    return _api_post("/v3/port/search", json_body=payload)
 
 
 @mcp.tool()
