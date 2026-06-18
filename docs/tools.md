@@ -4,7 +4,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 
 ## Tool count summary
 
-- Total tools: 33 (31 active + 2 deprecated aliases)
+- Total tools: 34 (32 active + 2 deprecated aliases)
 - Source file: `src/percepxion_mcp/server.py`
 
 ## Quick usage rules
@@ -46,6 +46,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 | Logs | `query_device_access_log` | Yes | `POST /v1/storage/file/devicelog/query-by-id` | None |
 | Logs | `download_device_access_log` | Yes | `POST /v1/storage/file/devicelog/download` | None |
 | Security | `get_security_telemetry` | Yes | `POST /v1/telemetry/stat/view` | None |
+| Security | `get_port_telemetry` | Yes | `POST /v1/telemetry/stat/view` (filtered) | None |
 | Audit | `investigate_audit_logs` | Yes | `POST /v1/audit/search` | None |
 | Audit | `investigate_user_audit_logs` | Yes | `POST /v1/audit/user/search` | None |
 | Jobs | `search_job_groups` | Yes | `POST /v1/job/jobgroup/search` | None |

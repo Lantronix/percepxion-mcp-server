@@ -1,6 +1,6 @@
 [project]
 name = "percepxion-mcp-server"
-version = "0.4.1"
+version = "0.4.2"
 description = "FastMCP server exposing Percepxion APIs as MCP tools"
 requires-python = ">=3.11"
 dependencies = [

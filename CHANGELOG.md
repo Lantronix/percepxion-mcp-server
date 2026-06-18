@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 - 2026-06-18
+
+### Added
+- `get_port_telemetry(device_id, port_number, tenant_id)` tool: queries `/v1/telemetry/stat/view` and returns filtered telemetry for a single port, managed-device hostname, model, serial, IP, OS version, uptime, CPU/memory/flash usage, and associated scripts. Eliminates the full-payload fetch + manual JSON parse required when only one port's data is needed.
+
+### Changed
+- `get_security_telemetry` docstring rewritten to accurately describe what the tool returns: full per-port `dp_info` records with up to 20 managed-device fields, console manager info, firmware state, network probes, and audit/syslog records. The previous one-liner ("Retrieve telemetry statistics useful for security analysis") gave no signal this was the canonical source for port-level and managed-device inventory, causing callers to miss it and report false "no managed devices" results.
+- `list_device_ports` docstring updated with an explicit NOTE that the tool returns port connection state only and does not include managed-device attachment details. Redirects callers to `get_security_telemetry` or `get_port_telemetry` for managed-device identity.
+
 ## 0.4.1 - 2026-06-16
 
 ### Fixed

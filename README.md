@@ -247,7 +247,7 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | Tool | Description | Async? |
 |---|---|---|
 | `reboot_device` | Reboot a device via Percepxion. | Yes, use `get_job_group` |
-| `list_device_ports` | List serial and device ports on a device. | No |
+| `list_device_ports` | List serial and device ports on a device. Returns port names, numbers, and connection state. Does not include managed-device identity, use `get_security_telemetry` or `get_port_telemetry` for hostname, model, serial, and OS version. | No |
 
 ### Firmware management
 
@@ -271,7 +271,8 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 
 | Tool | Description |
 |---|---|
-| `get_security_telemetry` | Retrieve security-relevant telemetry statistics for a device. |
+| `get_security_telemetry` | Retrieve full device and per-port telemetry. Source of truth for managed-device inventory: returns per-port `dp_info` records with hostname, model, serial, IP, OS version, uptime, and CPU/memory/flash usage for every attached device. Also includes console manager info, firmware state, network probes, and audit records. |
+| `get_port_telemetry` | Retrieve telemetry for a single port. Returns a structured managed-device object for that port only, faster and cheaper than `get_security_telemetry` when only one port is needed. |
 | `investigate_audit_logs` | Search platform audit records by user, time range, or keyword. |
 | `investigate_user_audit_logs` | Search user records with last recorded audit action per user. |
 

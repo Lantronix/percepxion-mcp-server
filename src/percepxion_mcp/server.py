@@ -627,7 +627,23 @@ def get_device_syslogs(device_id: str, limit: int = 10) -> dict[str, Any]:
 
 @mcp.tool()
 def get_security_telemetry(device_id: str, selected: bool = True, tenant_id: str | None = None) -> dict[str, Any]:
-    """Retrieve telemetry statistics useful for security analysis."""
+    """
+    Retrieve full device and per-port telemetry for a Percepxion-managed OOB device.
+
+    This is the canonical source for port-level and managed-device inventory. The
+    response contains per-port records (telemetry/port:N/status_record/dp_info) with
+    up to 20 fields per managed device: connection status, hostname, model, serial
+    number, IP address, OS version, uptime, CPU/memory/flash usage, and more. Also
+    includes console manager info, firmware state, network probes, and audit/syslog
+    records. Use this tool to answer "what managed devices are attached," "what is on
+    port N," or any port-level inventory question. For a single port use
+    get_port_telemetry instead to avoid fetching the full payload.
+
+    Args:
+        device_id: Percepxion device ID (from get_device_list).
+        selected: When True (default), returns only selected/active records.
+        tenant_id: Scope to a specific tenant.
+    """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
@@ -904,7 +920,10 @@ def list_device_ports(
     List serial/device ports on a Percepxion-managed device.
 
     Returns port names, numbers, and connection state. Use the port data to
-    identify targets for serial session access.
+    identify targets for serial session access. NOTE: returns port connection
+    state only and does not include managed-device attachment details (hostname,
+    model, serial, IP, OS version, etc.). Use get_security_telemetry for full
+    port and managed-device inventory, or get_port_telemetry for a single port.
 
     Args:
         device_id: Percepxion device ID (from get_device_list).
@@ -922,6 +941,51 @@ def list_device_ports(
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
     return _api_post("/v3/port/search", json_body=payload)
+
+
+@mcp.tool()
+def get_port_telemetry(
+    device_id: str,
+    port_number: int,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Retrieve telemetry for a single serial port, including the attached managed device.
+
+    Returns structured data for one port: connection status, managed-device hostname,
+    model, serial number, IP address, OS version, uptime, CPU/memory/flash usage, and
+    associated scripts. Much cheaper than get_security_telemetry when only one port is
+    needed, filters the full payload server-side and returns a clean object.
+
+    Args:
+        device_id: Percepxion device ID (from get_device_list).
+        port_number: The port number to query (e.g. 2 for port 2).
+        tenant_id: Scope to a specific tenant.
+    """
+    payload: dict[str, Any] = {"device_id": device_id, "selected": True}
+    if (t := _resolve_tenant(tenant_id)):
+        payload["tenant_id"] = t
+    raw = _api_post("/v1/telemetry/stat/view", json_body=payload)
+
+    dp_prefix = f"telemetry/port:{port_number}/status_record/dp_info"
+    scripts_prefix = f"telemetry/port:{port_number}/scripts"
+
+    managed_device: dict[str, Any] = {}
+    scripts: list[Any] = []
+
+    for group in raw.get("status_record", []):
+        path = group.get("path", "")
+        items = group.get("items", [])
+        if path == dp_prefix:
+            managed_device = {item["record_name"]: item.get("value") for item in items}
+        elif path == scripts_prefix:
+            scripts = items
+
+    return {
+        "port_number": port_number,
+        "managed_device": managed_device,
+        "scripts": scripts,
+    }
 
 
 @mcp.tool()
