@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-06-18
+
+### Added
+- Configurable transport mode via `MCP_TRANSPORT` env var (`stdio` default, `sse` for HTTP deployments). `MCP_HOST` (default `0.0.0.0`) and `MCP_PORT` (default `8765`) set the SSE bind address and port. Existing stdio users (Claude Code, Claude Desktop) are unaffected.
+- `EXPOSE 8765` in Dockerfile.
+
 ## 0.4.2 - 2026-06-18
 
 ### Added

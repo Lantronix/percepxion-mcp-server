@@ -1061,7 +1061,12 @@ def firmware_compliance_report(
 
 def main() -> None:
     """Run the FastMCP server."""
-    mcp.run()
+    from .config import MCP_HOST, MCP_PORT, MCP_TRANSPORT
+
+    if MCP_TRANSPORT == "sse":
+        mcp.run(transport="sse", host=MCP_HOST, port=MCP_PORT)
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":
