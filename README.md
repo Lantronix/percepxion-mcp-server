@@ -94,7 +94,7 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 | `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Default tenant ID used when callers omit `tenant_id`. Useful for single-tenant deployments. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
-| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, or `aws`. |
+| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, or `cyberark`. |
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
 
@@ -112,7 +112,7 @@ Keep `.env` out of version control. The repo includes `.env.example` as a starti
 
 ### Credential providers
 
-By default, credentials are read from environment variables. Two additional backends are available:
+By default, credentials are read from environment variables. Three additional backends are available:
 
 **HashiCorp Vault:**
 ```
@@ -130,6 +130,26 @@ AWS_REGION=us-east-1
 ```
 
 Install the AWS extra: `pip install -e ".[aws]"`
+
+**CyberArk Central Credential Provider (CCP):**
+
+Fetches Percepxion admin credentials from the CyberArk AIM Web Service at login time. No password stored in config files. Recommended for enterprises already running CyberArk.
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=cyberark
+CYBERARK_URL=https://cyberark.internal
+CYBERARK_APP_ID=PercepxionMCP
+CYBERARK_SAFE=PercepxionSafe
+CYBERARK_OBJECT=percepxion-admin-account
+```
+
+Optional mutual TLS (both vars required to enable):
+```
+CYBERARK_CERT_PATH=/path/to/client.pem
+CYBERARK_KEY_PATH=/path/to/client.key
+```
+
+Set `CYBERARK_VERIFY_SSL=false` to skip server cert verification in lab environments. The AppID must be registered in CyberArk with access to the specified safe, and the host running this server must be an allowed machine for that AppID.
 
 Full setup details in [`config/setup-instructions.md`](config/setup-instructions.md).
 
@@ -194,7 +214,7 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | Tool | Description |
 |---|---|
 | `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
-| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`) and clear the current session. |
+| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `cyberark`) and clear the current session. |
 
 ### Tenant management
 
