@@ -23,4 +23,7 @@ def get_provider(provider_name: str) -> CredentialProvider:
     if provider_name == "aws":
         from .aws import AwsProvider
         return AwsProvider()
-    raise ValueError(f"Unknown credential provider: '{provider_name}'. Choose: env, vault, aws")
+    if provider_name == "cyberark":
+        from .cyberark import CyberArkProvider
+        return CyberArkProvider()
+    raise ValueError(f"Unknown credential provider: '{provider_name}'. Choose: env, vault, aws, cyberark")

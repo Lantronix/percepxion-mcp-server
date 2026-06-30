@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 - 2026-06-30
+
+### Added
+- CyberArk Central Credential Provider (CCP) backend (`providers/cyberark.py`). Fetches Percepxion admin credentials from the CyberArk AIM Web Service REST API (`GET /AIMWebService/api/Accounts`) at login time. Required env vars: `CYBERARK_URL`, `CYBERARK_APP_ID`, `CYBERARK_SAFE`, `CYBERARK_OBJECT`. Optional mTLS support via `CYBERARK_CERT_PATH` and `CYBERARK_KEY_PATH`. Set `CYBERARK_VERIFY_SSL=false` to skip server cert verification in lab environments.
+- `reconfigure_credentials` tool now accepts `'cyberark'` as a valid provider.
+
 ## 0.4.3 - 2026-06-18
 
 ### Added

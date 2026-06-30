@@ -39,6 +39,7 @@ def login_with_env() -> dict[str, Any]:
     - env: reads PERCEPXION_USERNAME + PERCEPXION_PASSWORD from environment
     - vault: reads from HashiCorp Vault (requires VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH)
     - aws: reads from AWS Secrets Manager (requires AWS_SECRET_NAME, AWS_REGION)
+    - cyberark: reads from CyberArk CCP (requires CYBERARK_URL, CYBERARK_APP_ID, CYBERARK_SAFE, CYBERARK_OBJECT)
     """
     import os
     from .providers import get_provider
@@ -76,7 +77,7 @@ def reconfigure_credentials(provider: str) -> dict[str, Any]:
     Switch the active credential provider and clear the current session.
 
     After calling this, run login_with_env to authenticate with the new provider.
-    Valid providers: 'env', 'vault', 'aws'.
+    Valid providers: 'env', 'vault', 'aws', 'cyberark'.
 
     Args:
         provider: The credential provider to activate.
@@ -84,7 +85,7 @@ def reconfigure_credentials(provider: str) -> dict[str, Any]:
     import os
     from .providers import get_provider
 
-    valid = {"env", "vault", "aws"}
+    valid = {"env", "vault", "aws", "cyberark"}
     if provider not in valid:
         return _err(f"Invalid provider '{provider}'. Choose: {', '.join(sorted(valid))}")
 
