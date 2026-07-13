@@ -221,10 +221,12 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 
 | Tool | Description |
 |---|---|
-| `list_organizations` | List organizations visible to the current user. Use to discover `organization_id` values. |
+| `list_organizations` | List organizations you have permission for. Use to discover `organization_id` values. |
 | `list_tenants` | Deprecated alias for `list_organizations`, kept for backward compatibility. |
 
 Most tools accept an `organization_id` parameter to scope the call. The older `tenant_id` name is still accepted everywhere as a deprecated alias (see [Environment variables](#environment-variables)).
+
+`organization_id`/`tenant_id` accept either a UUID or an exact (case-insensitive) organization name. Name resolution only works for organizations with at least one visible device (it's derived from device search results, there's no dedicated organization-lookup endpoint), and is always scoped to your own login-derived permissions, a name match for an organization you aren't permitted for is rejected, not returned. If a name matches zero or more than one permitted organization, the tool call fails with a clear error instead of guessing; use the `organization_id` (UUID) directly to disambiguate.
 
 ### Device inventory
 

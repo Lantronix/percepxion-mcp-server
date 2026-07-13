@@ -13,14 +13,20 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 - Many actions run as jobs. These tools return a job group record, not the final device output.
 - Use `search_job_groups` to track job progress and results.
 - Job names include a Unix timestamp suffix (e.g. `CLI_abc123_1742900000`) to prevent collisions.
+- `organization_id`/`tenant_id` params accept either a UUID or an exact (case-insensitive)
+  organization name. Name resolution scans visible devices' embedded tenant info via
+  `/v3/device/search` (there's no dedicated organization-lookup endpoint) and is always
+  filtered to organizations you're permitted for, a name match outside that set is rejected.
+  An organization with zero visible devices can't be resolved by name; use its
+  `organization_id` (UUID) directly, discoverable via `list_organizations`.
 
 ## Summary table
 
 | Category | Tool | Returns final data | Primary API endpoint(s) | Follow up |
 |---|---|---|---|---|
 | Authentication | `login_with_env` | Yes | `POST /v2/user/login` | None |
-| Organization | `list_organizations` | Yes | `POST /v1/tenant/search` | None |
-| Organization | `list_tenants` (deprecated alias for `list_organizations`) | Yes | `POST /v1/tenant/search` | None |
+| Organization | `list_organizations` | Yes | `session.permitted_organization_ids` (login-derived) + `POST /v3/device/search` (best-effort names) | None |
+| Organization | `list_tenants` (deprecated alias for `list_organizations`) | Yes | same as `list_organizations` | None |
 | Inventory | `get_device_list` | Yes | `POST /v3/device/search` | None |
 | Inventory | `get_device_details` | Yes | `POST /v3/device/get` | None |
 | Inventory | `get_devices_by_organization` | Yes | `POST /v3/device/search` | None |
