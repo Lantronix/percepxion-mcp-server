@@ -73,14 +73,22 @@ def test_err_with_details():
 
 
 # --- _resolve_organization / _resolve_tenant (deprecated alias) ---
+#
+# UUID-shaped values are used here since they exercise the pure-passthrough
+# path (no organization-name resolution / HTTP call). Non-UUID values are
+# covered separately below under organization-name resolution tests.
+
+CALLER_UUID = "11111111-1111-1111-1111-111111111111"
+DEFAULT_UUID = "22222222-2222-2222-2222-222222222222"
+
 
 def test_resolve_organization_caller_supplied():
-    assert _resolve_organization("caller-id") == "caller-id"
+    assert _resolve_organization(CALLER_UUID) == CALLER_UUID
 
 
 def test_resolve_organization_falls_back_to_default(monkeypatch):
-    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", "default-id")
-    assert _resolve_organization(None) == "default-id"
+    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", DEFAULT_UUID)
+    assert _resolve_organization(None) == DEFAULT_UUID
 
 
 def test_resolve_organization_none_when_no_default(monkeypatch):
@@ -90,9 +98,73 @@ def test_resolve_organization_none_when_no_default(monkeypatch):
 
 def test_resolve_tenant_is_deprecated_alias_for_resolve_organization(monkeypatch):
     """_resolve_tenant is kept as a backward-compatible alias for _resolve_organization."""
-    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", "default-id")
-    assert _resolve_tenant("caller-id") == "caller-id"
-    assert _resolve_tenant(None) == "default-id"
+    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", DEFAULT_UUID)
+    assert _resolve_tenant(CALLER_UUID) == CALLER_UUID
+    assert _resolve_tenant(None) == DEFAULT_UUID
+
+
+# --- organization-name resolution (resolve_organization_by_name / UUID passthrough) ---
+
+
+def _device_search_response(httpserver, tenants):
+    """Mock a single-page /v3/device/search response with one device per tenant."""
+    results = [
+        {
+            "device_id": f"dev-{i}",
+            "tenant": [{"id": tid, "name": tname}],
+        }
+        for i, (tid, tname) in enumerate(tenants)
+    ]
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": results}, status=200
+    )
+
+
+def test_resolve_organization_by_name_single_exact_match(authed_session, httpserver):
+    org_id = "33333333-3333-3333-3333-333333333333"
+    authed_session.permitted_organization_ids = {org_id}
+    _device_search_response(httpserver, [(org_id, "Acme Corp")])
+    with patch.object(client_mod, "API_BASE_URL", httpserver.url_for("/api")):
+        result = _resolve_organization("acme corp")  # case-insensitive
+    assert result == org_id
+
+
+def test_resolve_organization_by_name_no_matches_raises(authed_session, httpserver):
+    authed_session.permitted_organization_ids = {"33333333-3333-3333-3333-333333333333"}
+    _device_search_response(httpserver, [("33333333-3333-3333-3333-333333333333", "Acme Corp")])
+    with patch.object(client_mod, "API_BASE_URL", httpserver.url_for("/api")):
+        with pytest.raises(client_mod.OrganizationResolutionError):
+            _resolve_organization("Nonexistent Org")
+
+
+def test_resolve_organization_by_name_ambiguous_raises(authed_session, httpserver):
+    id_a = "44444444-4444-4444-4444-444444444444"
+    id_b = "55555555-5555-5555-5555-555555555555"
+    authed_session.permitted_organization_ids = {id_a, id_b}
+    _device_search_response(httpserver, [(id_a, "Duplicate Name"), (id_b, "Duplicate Name")])
+    with patch.object(client_mod, "API_BASE_URL", httpserver.url_for("/api")):
+        with pytest.raises(client_mod.OrganizationResolutionError):
+            _resolve_organization("Duplicate Name")
+
+
+def test_resolve_organization_uuid_shaped_input_skips_resolution_entirely(authed_session):
+    """A UUID-shaped value must never trigger a device-search HTTP call."""
+    org_id = "66666666-6666-6666-6666-666666666666"
+    with patch("requests.post") as mock_post:
+        result = _resolve_organization(org_id)
+    assert result == org_id
+    mock_post.assert_not_called()
+
+
+def test_resolve_organization_by_name_rejects_match_outside_permitted_ids(authed_session, httpserver):
+    """A device-derived name match whose tenant.id is NOT in permitted_organization_ids
+    must be rejected, not returned. This is the security control."""
+    visible_but_not_permitted = "77777777-7777-7777-7777-777777777777"
+    authed_session.permitted_organization_ids = {"88888888-8888-8888-8888-888888888888"}
+    _device_search_response(httpserver, [(visible_but_not_permitted, "Acme Corp")])
+    with patch.object(client_mod, "API_BASE_URL", httpserver.url_for("/api")):
+        with pytest.raises(client_mod.OrganizationResolutionError):
+            _resolve_organization("Acme Corp")
 
 
 # --- _api_post ---
