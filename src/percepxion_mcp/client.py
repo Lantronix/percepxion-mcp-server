@@ -44,7 +44,14 @@ def _url(path: str) -> str:
 
 def _resolve_tenant(tenant_id: str | None) -> str | None:
     """Return caller-supplied tenant_id, or the configured default."""
-    return tenant_id or DEFAULT_TENANT_ID
+    if tenant_id:
+        return tenant_id
+    if DEFAULT_TENANT_ID:
+        logger.warning(
+            "No tenant_id supplied by caller, falling back to PERCEPXION_DEFAULT_TENANT_ID=%s",
+            DEFAULT_TENANT_ID,
+        )
+    return DEFAULT_TENANT_ID
 
 
 def _ok(data: Any, status_code: int | None = None) -> dict[str, Any]:
