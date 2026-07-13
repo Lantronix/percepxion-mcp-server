@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from .config import API_BASE_URL, DEFAULT_TENANT_ID, REQUEST_TIMEOUT
+from .config import API_BASE_URL, DEFAULT_ORGANIZATION_ID, REQUEST_TIMEOUT
 
 logger = logging.getLogger("percepxion_mcp")
 
@@ -42,16 +42,22 @@ def _url(path: str) -> str:
     return f"{API_BASE_URL}{path}"
 
 
-def _resolve_tenant(tenant_id: str | None) -> str | None:
-    """Return caller-supplied tenant_id, or the configured default."""
-    if tenant_id:
-        return tenant_id
-    if DEFAULT_TENANT_ID:
+def _resolve_organization(organization_id: str | None) -> str | None:
+    """Return caller-supplied organization_id, or the configured default."""
+    if organization_id:
+        return organization_id
+    if DEFAULT_ORGANIZATION_ID:
         logger.warning(
-            "No tenant_id supplied by caller, falling back to PERCEPXION_DEFAULT_TENANT_ID=%s",
-            DEFAULT_TENANT_ID,
+            "No organization_id supplied by caller, falling back to "
+            "PERCEPXION_DEFAULT_ORGANIZATION_ID=%s",
+            DEFAULT_ORGANIZATION_ID,
         )
-    return DEFAULT_TENANT_ID
+    return DEFAULT_ORGANIZATION_ID
+
+
+def _resolve_tenant(tenant_id: str | None) -> str | None:
+    """Deprecated alias for _resolve_organization(). Kept for backward compatibility."""
+    return _resolve_organization(tenant_id)
 
 
 def _ok(data: Any, status_code: int | None = None) -> dict[str, Any]:

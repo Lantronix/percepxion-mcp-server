@@ -7,6 +7,7 @@ from percepxion_mcp.client import (
     _ok,
     _err,
     _resolve_tenant,
+    _resolve_organization,
     _api_post,
 )
 
@@ -71,20 +72,27 @@ def test_err_with_details():
     assert result["details"] == {"detail": "bad request"}
 
 
-# --- _resolve_tenant ---
+# --- _resolve_organization / _resolve_tenant (deprecated alias) ---
 
-def test_resolve_tenant_caller_supplied():
+def test_resolve_organization_caller_supplied():
+    assert _resolve_organization("caller-id") == "caller-id"
+
+
+def test_resolve_organization_falls_back_to_default(monkeypatch):
+    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", "default-id")
+    assert _resolve_organization(None) == "default-id"
+
+
+def test_resolve_organization_none_when_no_default(monkeypatch):
+    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", None)
+    assert _resolve_organization(None) is None
+
+
+def test_resolve_tenant_is_deprecated_alias_for_resolve_organization(monkeypatch):
+    """_resolve_tenant is kept as a backward-compatible alias for _resolve_organization."""
+    monkeypatch.setattr(client_mod, "DEFAULT_ORGANIZATION_ID", "default-id")
     assert _resolve_tenant("caller-id") == "caller-id"
-
-
-def test_resolve_tenant_falls_back_to_default(monkeypatch):
-    monkeypatch.setattr(client_mod, "DEFAULT_TENANT_ID", "default-id")
     assert _resolve_tenant(None) == "default-id"
-
-
-def test_resolve_tenant_none_when_no_default(monkeypatch):
-    monkeypatch.setattr(client_mod, "DEFAULT_TENANT_ID", None)
-    assert _resolve_tenant(None) is None
 
 
 # --- _api_post ---

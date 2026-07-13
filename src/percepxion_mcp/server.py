@@ -9,14 +9,13 @@ from fastmcp import FastMCP
 
 from .config import (
     FIRMWARE_DIR,
-    DEFAULT_TENANT_ID,
 )
 from .client import (
     session,
     _api_post,
     _ok,
     _err,
-    _resolve_tenant,
+    _resolve_organization,
 )
 from .cli_policy import check_command, CLIPolicyViolation
 
@@ -28,6 +27,26 @@ logging.basicConfig(
 logger = logging.getLogger("percepxion_mcp")
 
 mcp = FastMCP("Percepxion-Server")
+
+
+def _effective_org_id(organization_id: str | None, tenant_id: str | None) -> str | None:
+    """
+    Merge the current organization_id param with the legacy tenant_id param.
+
+    Percepxion's product hierarchy is Project > Portal > Organization; "tenant_id"
+    predates that terminology and is kept only for backward compatibility.
+    organization_id wins if both are supplied. Logs a low-severity deprecation
+    notice when only the legacy tenant_id was used.
+    """
+    if organization_id:
+        return organization_id
+    if tenant_id:
+        logger.debug(
+            "tenant_id parameter is deprecated, use organization_id instead (tenant_id=%r)",
+            tenant_id,
+        )
+        return tenant_id
+    return None
 
 
 @mcp.tool()
@@ -107,6 +126,7 @@ def get_device_list(
     offset: int = 0,
     sort: str = "device_name",
     order: str = "asc",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Search devices and return matching inventory details."""
@@ -117,13 +137,13 @@ def get_device_list(
         "sort": sort,
         "order": order,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v3/device/search", json_body=payload)
 
 
 @mcp.tool()
-def get_device_details(device_id: str | None = None, serial_num: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
+def get_device_details(device_id: str | None = None, serial_num: str | None = None, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Get full device properties by device_id or serial_num."""
     if not device_id and not serial_num:
         return _err("Provide either device_id or serial_num.")
@@ -133,45 +153,45 @@ def get_device_details(device_id: str | None = None, serial_num: str | None = No
         payload["device_id"] = [device_id]
     if serial_num:
         payload["serial_num"] = [serial_num]
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
 
     return _api_post("/v3/device/get", json_body=payload)
 
 
 @mcp.tool()
-def get_devices_by_organization(tenant_id: str, limit: int = 100) -> dict[str, Any]:
-    """List devices assigned to a specific tenant."""
+def get_devices_by_organization(
+    organization_id: str | None = None,
+    tenant_id: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """
+    List devices assigned to a specific organization.
+
+    Args:
+        organization_id: The organization to list devices for.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
+        limit: Number of results to return (1-1000).
+    """
+    effective = _effective_org_id(organization_id, tenant_id)
+    if not effective:
+        return _err("Provide organization_id (or the deprecated tenant_id).")
     payload = {
         "search_string": "*",
         "offset": 0,
         "limit": min(max(1, limit), 1000),
-        "tenant_id": tenant_id,
+        "tenant_id": effective,
     }
     return _api_post("/v3/device/search", json_body=payload)
 
 
-@mcp.tool()
-def list_tenants(
+def _list_organizations_impl(
     search_query: str = "*",
     limit: int = 100,
     offset: int = 0,
     sort: str = "name",
     order: str = "asc",
 ) -> dict[str, Any]:
-    """
-    List tenants (organizations) visible to the authenticated user.
-
-    Use this to discover tenant_id values before calling tools that require one.
-    Returns tenant names, IDs, and status.
-
-    Args:
-        search_query: Filter by tenant name. Use '*' for all.
-        limit: Number of results to return (1-1000).
-        offset: Pagination offset.
-        sort: Field to sort by (default: 'name').
-        order: Sort direction, 'asc' or 'desc'.
-    """
     payload: dict[str, Any] = {
         "search_string": search_query,
         "limit": min(max(1, limit), 1000),
@@ -183,9 +203,54 @@ def list_tenants(
 
 
 @mcp.tool()
-def import_and_assign_devices(devices: list[dict[str, Any]], tenant_id: str | None = None) -> dict[str, Any]:
+def list_organizations(
+    search_query: str = "*",
+    limit: int = 100,
+    offset: int = 0,
+    sort: str = "name",
+    order: str = "asc",
+) -> dict[str, Any]:
     """
-    Assign devices to Percepxion tenant/project.
+    List organizations visible to the authenticated user.
+
+    Use this to discover organization_id values before calling tools that require one.
+    Returns organization names, IDs, and status.
+
+    Args:
+        search_query: Filter by organization name. Use '*' for all.
+        limit: Number of results to return (1-1000).
+        offset: Pagination offset.
+        sort: Field to sort by (default: 'name').
+        order: Sort direction, 'asc' or 'desc'.
+    """
+    return _list_organizations_impl(search_query, limit, offset, sort, order)
+
+
+@mcp.tool()
+def list_tenants(
+    search_query: str = "*",
+    limit: int = 100,
+    offset: int = 0,
+    sort: str = "name",
+    order: str = "asc",
+) -> dict[str, Any]:
+    """
+    Deprecated alias for list_organizations(), kept for backward compatibility.
+
+    Args:
+        search_query: Filter by organization name. Use '*' for all.
+        limit: Number of results to return (1-1000).
+        offset: Pagination offset.
+        sort: Field to sort by (default: 'name').
+        order: Sort direction, 'asc' or 'desc'.
+    """
+    return _list_organizations_impl(search_query, limit, offset, sort, order)
+
+
+@mcp.tool()
+def import_and_assign_devices(devices: list[dict[str, Any]], organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
+    """
+    Assign devices to a Percepxion organization/project.
     Each device item must include: device_id, device_name, serial_num.
     """
     if not devices:
@@ -209,7 +274,7 @@ def import_and_assign_devices(devices: list[dict[str, Any]], tenant_id: str | No
         }
         if device.get("device_description"):
             payload["device_description"] = device["device_description"]
-        if (t := _resolve_tenant(tenant_id)):
+        if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
             payload["tenant_id"] = t
 
         logger.info("Device assign requested, device_id=%s device_name=%s", device["device_id"], device["device_name"])
@@ -220,22 +285,22 @@ def import_and_assign_devices(devices: list[dict[str, Any]], tenant_id: str | No
 
 
 @mcp.tool()
-def unassign_devices(device_ids: list[str], tenant_id: str | None = None) -> dict[str, Any]:
-    """Unassign one or more devices from project/tenant."""
+def unassign_devices(device_ids: list[str], organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
+    """Unassign one or more devices from a project/organization."""
     if not device_ids:
         return _err("device_ids list cannot be empty.")
     payload: dict[str, Any] = {"device_id": device_ids}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     logger.info("Device unassign requested, device_ids=%s", device_ids)
     return _api_post("/v3/device/unassign", json_body=payload)
 
 
 @mcp.tool()
-def remove_device_from_platform(device_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def remove_device_from_platform(device_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Convenience wrapper for removing one device."""
     logger.info("Device removal from platform requested, device_id=%s", device_id)
-    return unassign_devices([device_id], tenant_id=tenant_id)
+    return unassign_devices([device_id], organization_id=organization_id, tenant_id=tenant_id)
 
 
 @mcp.tool()
@@ -245,6 +310,7 @@ def create_smart_group(
     device_ids: list[str] | None = None,
     description: str = "",
     temporary: bool = False,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -259,7 +325,8 @@ def create_smart_group(
         device_ids: Explicit list of Percepxion device IDs to include.
         description: Optional human-readable description.
         temporary: If True, the group is flagged for cleanup after use.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     if not query and not device_ids:
         return _err("Provide query or device_ids.")
@@ -273,7 +340,7 @@ def create_smart_group(
         payload["query_string"] = query
     if device_ids:
         payload["device_id"] = device_ids
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
 
     return _api_post("/v3/device/smartgroup/create", json_body=payload)
@@ -284,6 +351,7 @@ def list_smart_groups(
     search_query: str = "*",
     limit: int = 50,
     offset: int = 0,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -295,20 +363,21 @@ def list_smart_groups(
         search_query: Filter by name. Use '*' for all.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
         "search_string": search_query,
         "offset": max(0, offset),
         "limit": min(max(1, limit), 1000),
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v3/device/smartgroup/search", json_body=payload)
 
 
 @mcp.tool()
-def delete_smart_group(smart_group_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def delete_smart_group(smart_group_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Delete a Smart Group by ID.
 
@@ -316,10 +385,11 @@ def delete_smart_group(smart_group_id: str, tenant_id: str | None = None) -> dic
 
     Args:
         smart_group_id: The ID of the Smart Group to delete.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": smart_group_id}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     logger.info("Smart Group delete requested, smart_group_id=%s", smart_group_id)
     return _api_post("/v3/device/smartgroup/delete", json_body=payload)
@@ -330,6 +400,7 @@ def send_direct_cli_command(
     device_id: str,
     command: str,
     description: str = "Triggered via MCP",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -352,7 +423,10 @@ def send_direct_cli_command(
         device_id: Percepxion device ID (from get_device_list).
         command: CLI command string to execute on the device.
         description: Human-readable label stored in the job group record.
-        tenant_id: Tenant/org scope. Falls back to PERCEPXION_DEFAULT_TENANT_ID.
+        organization_id: Scope to a specific organization. Falls back to
+            PERCEPXION_DEFAULT_ORGANIZATION_ID.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
+            Falls back to PERCEPXION_DEFAULT_TENANT_ID if organization_id is not set.
     """
     try:
         check_command(command)
@@ -360,7 +434,7 @@ def send_direct_cli_command(
         return _err(str(exc))
 
     logger.info("CLI command dispatched, device_id=%s command=%r", device_id, command)
-    effective_tenant_id = _resolve_tenant(tenant_id)
+    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id))
     payload: dict[str, Any] = {
         "name": f"CLI_{device_id[:12]}_{int(time.time())}",
         "description": description,
@@ -383,6 +457,7 @@ def update_device_config(
     property_name: str | None = None,
     new_value: str | None = None,
     apply_now: bool = True,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -398,7 +473,7 @@ def update_device_config(
         "device_id": [device_id],
         "items": items,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         save_payload["tenant_id"] = t
 
     logger.info(
@@ -419,14 +494,14 @@ def update_device_config(
         "device_id": [device_id],
         "enable": True,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         job_payload["tenant_id"] = t
 
     job_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
     return _ok({"save": save_resp["data"], "apply_job": job_resp})
 
 
-def _resolve_template_id(template_name: str, source_device_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def _resolve_template_id(template_name: str, source_device_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "search_string": template_name,
         "device_id": [source_device_id],
@@ -435,7 +510,7 @@ def _resolve_template_id(template_name: str, source_device_id: str, tenant_id: s
         "sort": "name",
         "order": "desc",
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
 
     resp = _api_post("/v1/telemetry/template/search", json_body=payload)
@@ -457,6 +532,7 @@ def clone_device_config(
     target_device_id: str,
     record_names: list[str],
     template_name: str = "Cloned_Template",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a config template from source and apply it to target device."""
@@ -469,7 +545,7 @@ def clone_device_config(
         "device_id": source_device_id,
         "selected_config_group": record_names,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         template_payload["tenant_id"] = t
 
     logger.info(
@@ -480,7 +556,9 @@ def clone_device_config(
     if not create_resp["ok"]:
         return create_resp
 
-    template_id_resp = _resolve_template_id(template_name, source_device_id, tenant_id=tenant_id)
+    template_id_resp = _resolve_template_id(
+        template_name, source_device_id, organization_id=organization_id, tenant_id=tenant_id
+    )
     if not template_id_resp["ok"]:
         return _ok({"template_create": create_resp["data"], "warning": template_id_resp})
 
@@ -496,7 +574,7 @@ def clone_device_config(
         "device_id": [target_device_id],
         "enable": True,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         job_payload["tenant_id"] = t
 
     apply_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
@@ -510,9 +588,9 @@ def clone_device_config(
 
 
 @mcp.tool()
-def get_device_firmware_status(device_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def get_device_firmware_status(device_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Get device details and summarize firmware version/state."""
-    resp = get_device_details(device_id=device_id, tenant_id=tenant_id)
+    resp = get_device_details(device_id=device_id, organization_id=organization_id, tenant_id=tenant_id)
     if not resp["ok"]:
         return resp
 
@@ -537,6 +615,7 @@ def get_device_firmware_status(device_id: str, tenant_id: str | None = None) -> 
 def reboot_device(
     device_id: str,
     description: str = "Reboot requested via MCP",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -547,7 +626,8 @@ def reboot_device(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         description: Label stored in the job group record.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
         "name": f"Reboot_{device_id[:12]}_{int(time.time())}",
@@ -559,7 +639,7 @@ def reboot_device(
         "device_id": [device_id],
         "enable": True,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     logger.info("Device reboot requested, device_id=%s", device_id)
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
@@ -569,6 +649,7 @@ def reboot_device(
 def get_device_config(
     device_id: str,
     selected: bool = True,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -579,10 +660,11 @@ def get_device_config(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         selected: If True, return only the user-selected config items.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/config/get", json_body=payload)
 
@@ -594,6 +676,7 @@ def request_device_syslog_upload(
     log_level: str = "info",
     from_date: str | None = None,
     to_date: str | None = None,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -623,7 +706,7 @@ def request_device_syslog_upload(
         "enable": True,
         "log_request": log_request,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
@@ -640,7 +723,7 @@ def get_device_syslogs(device_id: str, limit: int = 10) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_security_telemetry(device_id: str, selected: bool = True, tenant_id: str | None = None) -> dict[str, Any]:
+def get_security_telemetry(device_id: str, selected: bool = True, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Retrieve full device and per-port telemetry for a Percepxion-managed OOB device.
 
@@ -656,10 +739,11 @@ def get_security_telemetry(device_id: str, selected: bool = True, tenant_id: str
     Args:
         device_id: Percepxion device ID (from get_device_list).
         selected: When True (default), returns only selected/active records.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/stat/view", json_body=payload)
 
@@ -674,6 +758,7 @@ def investigate_audit_logs(
     offset: int = 0,
     sort: str = "timestamp",
     order: str = "desc",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -691,7 +776,7 @@ def investigate_audit_logs(
     }
     if usernames:
         payload["username"] = usernames
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/audit/search", json_body=payload)
 
@@ -703,6 +788,7 @@ def investigate_user_audit_logs(
     offset: int = 0,
     sort: str = "username",
     order: str = "asc",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Search user records with last audit action summary."""
@@ -713,7 +799,7 @@ def investigate_user_audit_logs(
         "sort": sort,
         "order": order,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/audit/user/search", json_body=payload)
 
@@ -726,6 +812,7 @@ def update_firmware_by_smart_group(
     version: str,
     description: str = "Firmware update via MCP",
     enable: bool = True,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -757,7 +844,7 @@ def update_firmware_by_smart_group(
         "enable": enable,
         "smart_group_id": smart_group_ids,
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         data_payload["tenant_id"] = t
 
     try:
@@ -783,6 +870,7 @@ def list_firmware_content(
     search_query: str = "*",
     limit: int = 50,
     offset: int = 0,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -794,7 +882,8 @@ def list_firmware_content(
         search_query: Filter by firmware name. Use '*' for all.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
         "search_string": search_query,
@@ -802,7 +891,7 @@ def list_firmware_content(
         "offset": max(0, offset),
         "limit": min(max(1, limit), 1000),
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v3/content/search", json_body=payload)
 
@@ -813,6 +902,7 @@ def list_templates(
     device_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -825,7 +915,8 @@ def list_templates(
         device_id: Filter templates associated with a specific source device.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
         "search_string": search_query,
@@ -836,13 +927,13 @@ def list_templates(
     }
     if device_id:
         payload["device_id"] = [device_id]
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/template/search", json_body=payload)
 
 
 @mcp.tool()
-def delete_template(template_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def delete_template(template_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Delete a config template by ID.
 
@@ -850,10 +941,11 @@ def delete_template(template_id: str, tenant_id: str | None = None) -> dict[str,
 
     Args:
         template_id: The ID of the config template to delete.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": template_id}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     logger.info("Template delete requested, template_id=%s", template_id)
     return _api_post("/v1/telemetry/template/delete", json_body=payload)
@@ -866,10 +958,11 @@ def search_job_groups(
     subtype: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Search job groups to monitor asynchronous operation progress."""
-    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id))
     payload: dict[str, Any] = {
         "search_string": search_string,
         "type": job_type,
@@ -884,7 +977,7 @@ def search_job_groups(
 
 
 @mcp.tool()
-def get_job_group(job_group_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+def get_job_group(job_group_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Get full details and output for a specific job group by ID.
 
@@ -893,10 +986,11 @@ def get_job_group(job_group_id: str, tenant_id: str | None = None) -> dict[str, 
 
     Args:
         job_group_id: The job group ID returned by create operations or search_job_groups.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"job_group_id": job_group_id}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v1/job/jobgroup/get", json_body=payload)
 
@@ -933,6 +1027,7 @@ def list_device_ports(
     device_id: str,
     limit: int = 100,
     offset: int = 0,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -948,7 +1043,8 @@ def list_device_ports(
         device_id: Percepxion device ID (from get_device_list).
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
         "search_string": device_id,
@@ -957,7 +1053,7 @@ def list_device_ports(
         "order": "asc",
         "sort": "name",
     }
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     return _api_post("/v3/port/search", json_body=payload)
 
@@ -966,6 +1062,7 @@ def list_device_ports(
 def get_port_telemetry(
     device_id: str,
     port_number: int,
+    organization_id: str | None = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -979,10 +1076,11 @@ def get_port_telemetry(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         port_number: The port number to query (e.g. 2 for port 2).
-        tenant_id: Scope to a specific tenant.
+        organization_id: Scope to a specific organization.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": True}
-    if (t := _resolve_tenant(tenant_id)):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
         payload["tenant_id"] = t
     raw = _api_post("/v1/telemetry/stat/view", json_body=payload)
 
@@ -1011,6 +1109,7 @@ def get_port_telemetry(
 def firmware_compliance_report(
     expected_firmware_version: str,
     search_query: str = "*",
+    organization_id: str | None = None,
     tenant_id: str | None = None,
     limit: int = 1000,
     model_filter: str | None = None,
@@ -1024,6 +1123,7 @@ def firmware_compliance_report(
         offset=0,
         sort="device_name",
         order="asc",
+        organization_id=organization_id,
         tenant_id=tenant_id,
     )
     if not inventory.get("ok"):
