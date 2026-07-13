@@ -212,6 +212,7 @@ def import_and_assign_devices(devices: list[dict[str, Any]], tenant_id: str | No
         if (t := _resolve_tenant(tenant_id)):
             payload["tenant_id"] = t
 
+        logger.info("Device assign requested, device_id=%s device_name=%s", device["device_id"], device["device_name"])
         resp = _api_post("/v3/device/assign", json_body=payload)
         results.append({"device_id": device["device_id"], **resp})
 
@@ -226,12 +227,14 @@ def unassign_devices(device_ids: list[str], tenant_id: str | None = None) -> dic
     payload: dict[str, Any] = {"device_id": device_ids}
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
+    logger.info("Device unassign requested, device_ids=%s", device_ids)
     return _api_post("/v3/device/unassign", json_body=payload)
 
 
 @mcp.tool()
 def remove_device_from_platform(device_id: str, tenant_id: str | None = None) -> dict[str, Any]:
     """Convenience wrapper for removing one device."""
+    logger.info("Device removal from platform requested, device_id=%s", device_id)
     return unassign_devices([device_id], tenant_id=tenant_id)
 
 
@@ -318,6 +321,7 @@ def delete_smart_group(smart_group_id: str, tenant_id: str | None = None) -> dic
     payload: dict[str, Any] = {"id": smart_group_id}
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
+    logger.info("Smart Group delete requested, smart_group_id=%s", smart_group_id)
     return _api_post("/v3/device/smartgroup/delete", json_body=payload)
 
 
@@ -397,6 +401,10 @@ def update_device_config(
     if (t := _resolve_tenant(tenant_id)):
         save_payload["tenant_id"] = t
 
+    logger.info(
+        "Device config update requested, device_id=%s items=%r apply_now=%s",
+        device_id, items, apply_now,
+    )
     save_resp = _api_post("/v1/telemetry/config/save", json_body=save_payload)
     if not save_resp["ok"] or not apply_now:
         return save_resp
@@ -464,6 +472,10 @@ def clone_device_config(
     if (t := _resolve_tenant(tenant_id)):
         template_payload["tenant_id"] = t
 
+    logger.info(
+        "Config clone requested, source_device_id=%s target_device_id=%s template_name=%s",
+        source_device_id, target_device_id, template_name,
+    )
     create_resp = _api_post("/v1/telemetry/template/create", json_body=template_payload)
     if not create_resp["ok"]:
         return create_resp
@@ -549,6 +561,7 @@ def reboot_device(
     }
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
+    logger.info("Device reboot requested, device_id=%s", device_id)
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
 
@@ -751,6 +764,10 @@ def update_firmware_by_smart_group(
         with firmware_path.open("rb") as firmware_file:
             files = {"file": (firmware_path.name, firmware_file, "application/octet-stream")}
             form_data = {"data": json.dumps(data_payload)}
+            logger.info(
+                "Firmware update requested, content_name=%s version=%s smart_group_ids=%s",
+                content_name, version, smart_group_ids,
+            )
             return _api_post(
                 "/v3/content/create",
                 form_data=form_data,
@@ -838,6 +855,7 @@ def delete_template(template_id: str, tenant_id: str | None = None) -> dict[str,
     payload: dict[str, Any] = {"id": template_id}
     if (t := _resolve_tenant(tenant_id)):
         payload["tenant_id"] = t
+    logger.info("Template delete requested, template_id=%s", template_id)
     return _api_post("/v1/telemetry/template/delete", json_body=payload)
 
 
