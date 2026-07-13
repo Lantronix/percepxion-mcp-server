@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-07-13
 
 ### Added
 - Organization-name lookup: `organization_id`/`tenant_id` params across all tools now accept either a UUID or an exact (case-insensitive) organization display name. Names are resolved by scanning visible devices' embedded `tenant[]` info via `POST /v3/device/search` (bounded pagination, a few pages max) since there's no dedicated organization-lookup endpoint. Resolution is hard-scoped to the authenticated user's own login-derived RBAC permissions (`session.permitted_organization_ids`, captured from `user.group[].tenant_id` in the `/v2/user/login` response): a name match for an organization outside that set is rejected, not returned, this is a real permission boundary, not just a UX filter. A UUID-shaped value always skips name resolution entirely (no extra API call, pure passthrough, unchanged from prior behavior). Zero matches or ambiguous (2+) matches raise a clear error naming the problem instead of guessing.
