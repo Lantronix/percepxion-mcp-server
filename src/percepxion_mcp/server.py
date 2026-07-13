@@ -16,6 +16,8 @@ from .client import (
     _ok,
     _err,
     _resolve_organization,
+    _harvest_organization_candidates,
+    OrganizationResolutionError,
 )
 from .cli_policy import check_command, CLIPolicyViolation
 
@@ -86,6 +88,26 @@ def login_with_env() -> dict[str, Any]:
 
     session.auth_token = token
     session.csrf_token = csrf
+
+    # Capture the RBAC-authoritative list of organizations this user has
+    # permission for (user.group[].tenant_id), used as the permission
+    # boundary for organization-name lookup. Degrade gracefully to an empty
+    # set if the field is missing/malformed rather than raising, name lookup
+    # will then correctly report "no permitted organizations available".
+    permitted_ids: set[str] = set()
+    user = data.get("user") or {}
+    groups = user.get("group") or []
+    for group in groups:
+        if isinstance(group, dict):
+            tenant_id = group.get("tenant_id")
+            if tenant_id:
+                permitted_ids.add(tenant_id)
+    session.permitted_organization_ids = permitted_ids
+    logger.debug(
+        "Captured %d permitted_organization_ids from login response user.group",
+        len(permitted_ids),
+    )
+
     logger.info("Authenticated via %s provider", credential_provider)
     return _ok({"message": "Authenticated successfully.", "username": creds["username"]})
 
@@ -169,18 +191,19 @@ def get_devices_by_organization(
     List devices assigned to a specific organization.
 
     Args:
-        organization_id: The organization to list devices for.
+        organization_id: The organization to list devices for. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
         limit: Number of results to return (1-1000).
     """
     effective = _effective_org_id(organization_id, tenant_id)
     if not effective:
         return _err("Provide organization_id (or the deprecated tenant_id).")
+    resolved = _resolve_organization(effective)
     payload = {
         "search_string": "*",
         "offset": 0,
         "limit": min(max(1, limit), 1000),
-        "tenant_id": effective,
+        "tenant_id": resolved,
     }
     return _api_post("/v3/device/search", json_body=payload)
 
@@ -192,14 +215,67 @@ def _list_organizations_impl(
     sort: str = "name",
     order: str = "asc",
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "search_string": search_query,
-        "limit": min(max(1, limit), 1000),
-        "offset": max(0, offset),
-        "sort": sort,
-        "order": order,
-    }
-    return _api_post("/v1/tenant/search", json_body=payload)
+    """
+    List organizations the authenticated user has permission for.
+
+    NOTE: Percepxion has no working organization/tenant listing endpoint.
+    /v1/tenant/search is defined in the API spec but not implemented
+    server-side (it returns a 400 VALIDATION_FAILED in production); the
+    previous implementation of this tool called that dead endpoint and
+    always failed. This implementation instead treats
+    session.permitted_organization_ids (captured from the login response's
+    user.group[].tenant_id, i.e. this user's RBAC-authoritative organization
+    list) as the source of truth for IDs, and best-effort resolves display
+    names by scanning visible devices' embedded tenant info via
+    /v3/device/search. An organization with zero visible devices will still
+    appear (its ID is permission-derived, not device-derived) but with
+    name=None, since there is no other way to learn its display name.
+    """
+    if not session.is_authenticated():
+        return _err("Not authenticated. Run login_with_env first.")
+
+    permitted = session.permitted_organization_ids
+    if not permitted:
+        return _ok({
+            "organizations": [],
+            "total": 0,
+            "warning": (
+                "No permitted organizations found in the current session. This can happen "
+                "if the login response did not include a user.group list, or the "
+                "authenticated user genuinely has no organization permissions. "
+                "Run login_with_env again if this is unexpected."
+            ),
+        })
+
+    try:
+        candidates = _harvest_organization_candidates()
+    except OrganizationResolutionError as exc:
+        candidates = {}
+        logger.warning("Could not resolve organization display names: %s", exc)
+
+    organizations = [
+        {"organization_id": org_id, "name": candidates.get(org_id)}
+        for org_id in permitted
+    ]
+
+    if search_query and search_query != "*":
+        needle = search_query.strip().lower()
+        organizations = [
+            o for o in organizations if o["name"] and needle in o["name"].lower()
+        ]
+
+    reverse = order == "desc"
+    if sort == "name":
+        organizations.sort(key=lambda o: (o["name"] or "").lower(), reverse=reverse)
+    else:
+        organizations.sort(key=lambda o: o["organization_id"], reverse=reverse)
+
+    total = len(organizations)
+    offset = max(0, offset)
+    limit = min(max(1, limit), 1000)
+    page = organizations[offset: offset + limit]
+
+    return _ok({"organizations": page, "total": total})
 
 
 @mcp.tool()
@@ -211,16 +287,18 @@ def list_organizations(
     order: str = "asc",
 ) -> dict[str, Any]:
     """
-    List organizations visible to the authenticated user.
+    List organizations the authenticated user has permission for.
 
     Use this to discover organization_id values before calling tools that require one.
-    Returns organization names, IDs, and status.
+    IDs come from your login session's RBAC permissions (authoritative). Display names
+    are best-effort: only resolvable for organizations with at least one visible device,
+    an organization with zero visible devices will appear with name=None.
 
     Args:
-        search_query: Filter by organization name. Use '*' for all.
+        search_query: Case-insensitive substring filter on organization name. Use '*' for all.
         limit: Number of results to return (1-1000).
         offset: Pagination offset.
-        sort: Field to sort by (default: 'name').
+        sort: Field to sort by, 'name' (default) or 'organization_id'.
         order: Sort direction, 'asc' or 'desc'.
     """
     return _list_organizations_impl(search_query, limit, offset, sort, order)
@@ -238,10 +316,10 @@ def list_tenants(
     Deprecated alias for list_organizations(), kept for backward compatibility.
 
     Args:
-        search_query: Filter by organization name. Use '*' for all.
+        search_query: Case-insensitive substring filter on organization name. Use '*' for all.
         limit: Number of results to return (1-1000).
         offset: Pagination offset.
-        sort: Field to sort by (default: 'name').
+        sort: Field to sort by, 'name' (default) or 'organization_id'.
         order: Sort direction, 'asc' or 'desc'.
     """
     return _list_organizations_impl(search_query, limit, offset, sort, order)
@@ -325,7 +403,7 @@ def create_smart_group(
         device_ids: Explicit list of Percepxion device IDs to include.
         description: Optional human-readable description.
         temporary: If True, the group is flagged for cleanup after use.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     if not query and not device_ids:
@@ -363,7 +441,7 @@ def list_smart_groups(
         search_query: Filter by name. Use '*' for all.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
@@ -385,7 +463,7 @@ def delete_smart_group(smart_group_id: str, organization_id: str | None = None, 
 
     Args:
         smart_group_id: The ID of the Smart Group to delete.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": smart_group_id}
@@ -423,7 +501,7 @@ def send_direct_cli_command(
         device_id: Percepxion device ID (from get_device_list).
         command: CLI command string to execute on the device.
         description: Human-readable label stored in the job group record.
-        organization_id: Scope to a specific organization. Falls back to
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name. Falls back to
             PERCEPXION_DEFAULT_ORGANIZATION_ID.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
             Falls back to PERCEPXION_DEFAULT_TENANT_ID if organization_id is not set.
@@ -626,7 +704,7 @@ def reboot_device(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         description: Label stored in the job group record.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
@@ -660,7 +738,7 @@ def get_device_config(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         selected: If True, return only the user-selected config items.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
@@ -739,7 +817,7 @@ def get_security_telemetry(device_id: str, selected: bool = True, organization_i
     Args:
         device_id: Percepxion device ID (from get_device_list).
         selected: When True (default), returns only selected/active records.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
@@ -882,7 +960,7 @@ def list_firmware_content(
         search_query: Filter by firmware name. Use '*' for all.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
@@ -915,7 +993,7 @@ def list_templates(
         device_id: Filter templates associated with a specific source device.
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
@@ -941,7 +1019,7 @@ def delete_template(template_id: str, organization_id: str | None = None, tenant
 
     Args:
         template_id: The ID of the config template to delete.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": template_id}
@@ -986,7 +1064,7 @@ def get_job_group(job_group_id: str, organization_id: str | None = None, tenant_
 
     Args:
         job_group_id: The job group ID returned by create operations or search_job_groups.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"job_group_id": job_group_id}
@@ -1043,7 +1121,7 @@ def list_device_ports(
         device_id: Percepxion device ID (from get_device_list).
         limit: Number of results (1-1000).
         offset: Pagination offset.
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {
@@ -1076,7 +1154,7 @@ def get_port_telemetry(
     Args:
         device_id: Percepxion device ID (from get_device_list).
         port_number: The port number to query (e.g. 2 for port 2).
-        organization_id: Scope to a specific organization.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": True}
