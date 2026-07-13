@@ -19,7 +19,7 @@ This MCP server gives AI assistants direct access to Percepxion's management cap
 - **Firmware updates**, upload firmware and target a Smart Group for coordinated rollout
 - **Log retrieval**, pull syslogs or access logs from devices on demand
 - **Audit investigation**, search platform audit records by user, time range, or action
-- **Tenant management**, list organizations and scope operations to specific tenants
+- **Organization management**, list organizations and scope operations to a specific one
 
 ---
 
@@ -91,7 +91,8 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 | `PERCEPXION_USERNAME` | Yes |, | Percepxion login username |
 | `PERCEPXION_PASSWORD` | Yes |, | Percepxion login password |
 | `PERCEPXION_API_URL` | No | `https://api.percepxion.ai/api` | Percepxion API base URL. Use `https://api.gopercepxion.ai/api` for the Lantronix internal sandbox. |
-| `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Default tenant ID used when callers omit `tenant_id`. Useful for single-tenant deployments. |
+| `PERCEPXION_DEFAULT_ORGANIZATION_ID` | No |, | Default organization ID used when callers omit `organization_id`. Useful for single-organization deployments. |
+| `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Deprecated alias for `PERCEPXION_DEFAULT_ORGANIZATION_ID`. Still works; if both are set, the new variable wins. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
 | `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, or `cyberark`. |
@@ -216,11 +217,14 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
 | `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `cyberark`) and clear the current session. |
 
-### Tenant management
+### Organization management
 
 | Tool | Description |
 |---|---|
-| `list_tenants` | List organizations visible to the current user. Use to discover `tenant_id` values. |
+| `list_organizations` | List organizations visible to the current user. Use to discover `organization_id` values. |
+| `list_tenants` | Deprecated alias for `list_organizations`, kept for backward compatibility. |
+
+Most tools accept an `organization_id` parameter to scope the call. The older `tenant_id` name is still accepted everywhere as a deprecated alias (see [Environment variables](#environment-variables)).
 
 ### Device inventory
 
@@ -228,14 +232,14 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 |---|---|
 | `get_device_list` | Search and paginate the device inventory. |
 | `get_device_details` | Get full device properties by `device_id` or `serial_num`. |
-| `get_devices_by_organization` | List all devices in a specific tenant. |
+| `get_devices_by_organization` | List all devices in a specific organization. |
 
 ### Device lifecycle
 
 | Tool | Description |
 |---|---|
-| `import_and_assign_devices` | Assign devices to a tenant. |
-| `unassign_devices` | Remove one or more devices from a tenant. |
+| `import_and_assign_devices` | Assign devices to an organization. |
+| `unassign_devices` | Remove one or more devices from an organization. |
 | `remove_device_from_platform` | Remove a single device (convenience wrapper). |
 
 ### Smart Groups

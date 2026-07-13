@@ -10,6 +10,9 @@ from percepxion_mcp.server import (
     get_device_list,
     get_job_group,
     list_device_ports,
+    list_organizations,
+    list_tenants,
+    get_devices_by_organization,
 )
 
 
@@ -177,6 +180,96 @@ def test_list_device_ports_sends_search_string_key(authed_session):
     assert "search_string" in sent_body, "payload must use key 'search_string'"
     assert "device_id" not in sent_body, "payload must not use legacy key 'device_id'"
     assert sent_body["search_string"] == "dev-abc"
+
+
+# --- organization_id / tenant_id (deprecated alias) rename ---
+
+def test_organization_id_param_sent_as_tenant_id_in_payload(authed_session, httpserver):
+    """New organization_id param resolves and is still sent as 'tenant_id' (API constraint)."""
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_device_list(organization_id="org-abc")
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "org-abc"
+
+
+def test_legacy_tenant_id_param_still_works(authed_session, httpserver):
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_device_list(tenant_id="tenant-legacy")
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "tenant-legacy"
+
+
+def test_organization_id_takes_precedence_over_legacy_tenant_id(authed_session, httpserver):
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_device_list(organization_id="org-wins", tenant_id="tenant-loses")
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "org-wins"
+
+
+def test_default_organization_id_env_fallback_used_when_neither_supplied(authed_session, httpserver):
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")), \
+         patch.object(cm, "DEFAULT_ORGANIZATION_ID", "default-org"):
+        result = get_device_list()
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "default-org"
+
+
+def test_list_organizations_and_list_tenants_return_same_result(authed_session, httpserver):
+    """list_organizations is primary; list_tenants is a deprecated alias hitting the same endpoint."""
+    httpserver.expect_request("/api/v1/tenant/search", method="POST").respond_with_json(
+        {"tenants": [{"id": "org-1", "name": "Acme"}]}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        org_result = list_organizations()
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        tenant_result = list_tenants()
+    assert org_result["ok"] is True
+    assert tenant_result["ok"] is True
+    assert org_result["data"] == tenant_result["data"]
+
+
+def test_get_devices_by_organization_requires_an_id():
+    result = get_devices_by_organization()
+    assert result["ok"] is False
+    assert "organization_id" in result["error"]
+
+
+def test_get_devices_by_organization_accepts_organization_id(authed_session, httpserver):
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_devices_by_organization(organization_id="org-abc")
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "org-abc"
+
+
+def test_get_devices_by_organization_accepts_legacy_tenant_id(authed_session, httpserver):
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_devices_by_organization(tenant_id="tenant-legacy")
+    assert result["ok"] is True
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == "tenant-legacy"
 
 
 def test_list_device_ports_returns_port_data(authed_session, httpserver):
