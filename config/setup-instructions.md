@@ -30,8 +30,9 @@ PERCEPXION_API_URL=https://api.percepxion.ai/api
 PERCEPXION_USERNAME=your-email@example.com
 PERCEPXION_PASSWORD=your-password
 
-# Optional: default tenant ID if your account has multiple tenants
-PERCEPXION_DEFAULT_TENANT_ID=
+# Optional: default organization ID if your account has multiple organizations
+PERCEPXION_DEFAULT_ORGANIZATION_ID=
+# Deprecated alias, still works: PERCEPXION_DEFAULT_TENANT_ID=
 
 # Optional: restrict firmware uploads to a specific directory
 PERCEPXION_FIRMWARE_DIR=

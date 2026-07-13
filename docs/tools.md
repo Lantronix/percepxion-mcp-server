@@ -4,7 +4,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 
 ## Tool count summary
 
-- Total tools: 34 (32 active + 2 deprecated aliases)
+- Total tools: 35 (32 active + 3 deprecated aliases)
 - Source file: `src/percepxion_mcp/server.py`
 
 ## Quick usage rules
@@ -19,7 +19,8 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 | Category | Tool | Returns final data | Primary API endpoint(s) | Follow up |
 |---|---|---|---|---|
 | Authentication | `login_with_env` | Yes | `POST /v2/user/login` | None |
-| Tenant | `list_tenants` | Yes | `POST /v1/tenant/search` | None |
+| Organization | `list_organizations` | Yes | `POST /v1/tenant/search` | None |
+| Organization | `list_tenants` (deprecated alias for `list_organizations`) | Yes | `POST /v1/tenant/search` | None |
 | Inventory | `get_device_list` | Yes | `POST /v3/device/search` | None |
 | Inventory | `get_device_details` | Yes | `POST /v3/device/get` | None |
 | Inventory | `get_devices_by_organization` | Yes | `POST /v3/device/search` | None |
@@ -59,6 +60,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 |---|---|
 | `send_cli_command` | `send_direct_cli_command` |
 | `automate_smart_group` | `create_smart_group` |
+| `list_tenants` | `list_organizations` |
 
 ## CLI Command Policy
 

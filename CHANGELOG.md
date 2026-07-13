@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- CLI policy: `check_command` now rejects commands containing embedded `\r`/`\n` before normalization, closing a deny-list bypass (e.g. `"show version\nreload\nwrite erase"` previously normalized to a single string that passed the read-prefix check and matched no deny-list entry).
+- Audit logging added to 9 destructive tools that previously had none: `import_and_assign_devices`, `unassign_devices`, `remove_device_from_platform`, `delete_smart_group`, `update_device_config`, `clone_device_config`, `reboot_device`, `update_firmware_by_smart_group`, `delete_template`.
+- `_resolve_tenant`/`_resolve_organization` now logs a warning when it silently falls back to the configured default organization scope, instead of failing silently.
+
+### Changed
+- Renamed "tenant" terminology to "organization" across the tool surface to match Percepxion's actual product hierarchy (Project > Portal > Organization). Every tool that previously accepted `tenant_id` now accepts `organization_id` as the primary parameter; `tenant_id` still works as a deprecated alias (organization_id wins if both are set). `PERCEPXION_DEFAULT_ORGANIZATION_ID` is the new primary env var; `PERCEPXION_DEFAULT_TENANT_ID` keeps working as a legacy fallback. `list_tenants` is now a deprecated alias for the new `list_organizations` tool. The outgoing Percepxion API field (`POST /v1/tenant/search`, payload key `tenant_id`) is unchanged, that's an external API constraint.
+
 ## 0.4.4 - 2026-06-30
 
 ### Added

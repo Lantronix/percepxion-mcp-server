@@ -10,7 +10,7 @@ This guide covers the conventions used in this repo.
 - Keep tool signatures small and predictable.
 - Return JSON-serializable data.
 - Use one response envelope for all tools.
-- Support tenant scoping when the API supports it.
+- Support organization scoping when the API supports it.
 
 ## Where tools live
 
@@ -56,8 +56,8 @@ Template:
 from typing import Any
 
 @mcp.tool()
-def get_tenants(limit: int = 100, offset: int = 0) -> dict[str, Any]:
-    """List tenants visible to the current user."""
+def get_organizations(limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    """List organizations visible to the current user."""
 
     payload = {
         "search_string": "*",
@@ -70,11 +70,15 @@ def get_tenants(limit: int = 100, offset: int = 0) -> dict[str, Any]:
     return _api_post("/v1/tenant/search", json_body=payload)
 ```
 
-### 4. Add tenant scoping when it fits
+### 4. Add organization scoping when it fits
 
-Many Percepxion endpoints accept `tenant_id`.
-Add `tenant_id: str | None = None` to the tool signature.
-When it is present, add it to the payload.
+Many Percepxion endpoints accept a `tenant_id` field (that's the API's own field name,
+an external constraint we don't control). On the MCP server side, expose it to callers
+as `organization_id: str | None = None` (Percepxion's real product terminology is
+Project > Portal > Organization), and also accept the older `tenant_id: str | None = None`
+param name for backward compatibility. Resolve the effective value with
+`_effective_org_id(organization_id, tenant_id)` and pass the result through
+`_resolve_organization(...)` before adding it to the payload under the `tenant_id` key.
 
 ### 5. Keep paging rules consistent
 
@@ -149,6 +153,6 @@ Then start the server and call the new tool.
 - Docstring states what the tool does.
 - Parameters have defaults and simple types.
 - Return value uses `_ok()` or `_err()`.
-- Tool accepts `tenant_id` when the API supports it.
+- Tool accepts `organization_id` (with `tenant_id` accepted as a deprecated alias) when the API supports it.
 - Tool limits `limit` and clamps `offset`.
 - Job tools document the follow up search.
