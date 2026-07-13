@@ -1,14 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-07-13
+
+### Added
+- Organization-name lookup: `organization_id`/`tenant_id` params across all tools now accept either a UUID or an exact (case-insensitive) organization display name. Names are resolved by scanning visible devices' embedded `tenant[]` info via `POST /v3/device/search` (bounded pagination, a few pages max) since there's no dedicated organization-lookup endpoint. Resolution is hard-scoped to the authenticated user's own login-derived RBAC permissions (`session.permitted_organization_ids`, captured from `user.group[].tenant_id` in the `/v2/user/login` response): a name match for an organization outside that set is rejected, not returned, this is a real permission boundary, not just a UX filter. A UUID-shaped value always skips name resolution entirely (no extra API call, pure passthrough, unchanged from prior behavior). Zero matches or ambiguous (2+) matches raise a clear error naming the problem instead of guessing.
 
 ### Fixed
+- `list_organizations`/`list_tenants` were calling `POST /v1/tenant/search`, an endpoint that does not exist server-side (`400 VALIDATION_FAILED`, "Route defined in Swagger specification but there is no defined post operation"). Both tools always failed in production; this was masked by fully-mocked tests. Reimplemented using `session.permitted_organization_ids` (login-derived, authoritative) for the ID list, with best-effort display names resolved from visible devices via `/v3/device/search`. An organization with zero visible devices now appears with a known `organization_id` but `name: null`, that's a documented limitation, not a bug: there is no other endpoint that exposes organization display names.
 - CLI policy: `check_command` now rejects commands containing embedded `\r`/`\n` before normalization, closing a deny-list bypass (e.g. `"show version\nreload\nwrite erase"` previously normalized to a single string that passed the read-prefix check and matched no deny-list entry).
 - Audit logging added to 9 destructive tools that previously had none: `import_and_assign_devices`, `unassign_devices`, `remove_device_from_platform`, `delete_smart_group`, `update_device_config`, `clone_device_config`, `reboot_device`, `update_firmware_by_smart_group`, `delete_template`.
 - `_resolve_tenant`/`_resolve_organization` now logs a warning when it silently falls back to the configured default organization scope, instead of failing silently.
+- `get_devices_by_organization` was not routing its `organization_id`/`tenant_id` value through `_resolve_organization`, so it never got the name-resolution (or default-scope-fallback) behavior applied to every other tool. Fixed for consistency with the rest of the tool surface.
 
 ### Changed
-- Renamed "tenant" terminology to "organization" across the tool surface to match Percepxion's actual product hierarchy (Project > Portal > Organization). Every tool that previously accepted `tenant_id` now accepts `organization_id` as the primary parameter; `tenant_id` still works as a deprecated alias (organization_id wins if both are set). `PERCEPXION_DEFAULT_ORGANIZATION_ID` is the new primary env var; `PERCEPXION_DEFAULT_TENANT_ID` keeps working as a legacy fallback. `list_tenants` is now a deprecated alias for the new `list_organizations` tool. The outgoing Percepxion API field (`POST /v1/tenant/search`, payload key `tenant_id`) is unchanged, that's an external API constraint.
+- Renamed "tenant" terminology to "organization" across the tool surface to match Percepxion's actual product hierarchy (Project > Portal > Organization). Every tool that previously accepted `tenant_id` now accepts `organization_id` as the primary parameter; `tenant_id` still works as a deprecated alias (organization_id wins if both are set). `PERCEPXION_DEFAULT_ORGANIZATION_ID` is the new primary env var; `PERCEPXION_DEFAULT_TENANT_ID` keeps working as a legacy fallback. `list_tenants` is now a deprecated alias for the new `list_organizations` tool. The outgoing Percepxion API field (payload key `tenant_id`) is unchanged, that's an external API constraint.
 
 ## 0.4.4 - 2026-06-30
 

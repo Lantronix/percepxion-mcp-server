@@ -221,10 +221,12 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 
 | Tool | Description |
 |---|---|
-| `list_organizations` | List organizations visible to the current user. Use to discover `organization_id` values. |
+| `list_organizations` | List organizations you have permission for. Use to discover `organization_id` values. |
 | `list_tenants` | Deprecated alias for `list_organizations`, kept for backward compatibility. |
 
 Most tools accept an `organization_id` parameter to scope the call. The older `tenant_id` name is still accepted everywhere as a deprecated alias (see [Environment variables](#environment-variables)).
+
+`organization_id`/`tenant_id` accept either a UUID or an exact (case-insensitive) organization name. Name resolution only works for organizations with at least one visible device (it's derived from device search results, there's no dedicated organization-lookup endpoint), and is always scoped to your own login-derived permissions, a name match for an organization you aren't permitted for is rejected, not returned. If a name matches zero or more than one permitted organization, the tool call fails with a clear error instead of guessing; use the `organization_id` (UUID) directly to disambiguate.
 
 ### Device inventory
 
@@ -353,6 +355,11 @@ This server executes operations on network infrastructure. Treat it accordingly.
 - The server communicates with Percepxion over HTTPS only.
 - The default endpoint is `api.percepxion.ai`. The Lantronix internal sandbox is `api.gopercepxion.ai`. Verify `PERCEPXION_API_URL` before running in any automated context.
 
+**Organization-name resolution:**
+- `organization_id`/`tenant_id` accept a name as a convenience, but resolution is hard-scoped to the authenticated session: candidate organizations come only from `session.permitted_organization_ids`, populated from your own `/v2/user/login` response (`user.group[].tenant_id`) at login time.
+- A device-derived name match for an organization outside that permitted set is rejected, not returned. This is a real permission boundary, not just a UX filter, it prevents organization-name lookup from being used to discover or probe organizations you aren't already RBAC-entitled to.
+- A UUID-shaped `organization_id`/`tenant_id` always skips name resolution entirely (no extra API call), identical to prior behavior.
+
 ---
 
 ## Troubleshooting
@@ -367,6 +374,9 @@ This server executes operations on network infrastructure. Treat it accordingly.
 | "Write commands are disabled" | CLI policy in read-only mode | Set `PERCEPXION_CLI_WRITE_ENABLED=true` in `.env` |
 | "Command is in the deny list" | Built-in deny list blocks the command | Set `PERCEPXION_CLI_YOLO=true` to bypass (use with caution) |
 | Server exits immediately | Python path or venv issue | Run `python percepxion_mcp.py` directly to see the error |
+| "No permitted organizations available" when resolving an organization name | Login response had no `user.group` entries, or `login_with_env` wasn't called | Call `login_with_env` first; confirm the account has organization group membership in Percepxion |
+| Organization name resolves to "0 matches" | The org has no visible devices (name resolution is device-derived), or the name doesn't match any organization you're permitted for | Use `list_organizations` to find the `organization_id` (UUID) directly and pass that instead |
+| Organization name resolves to "ambiguous, multiple matches" | Two or more permitted organizations share the same name | Use `list_organizations` to disambiguate and pass the `organization_id` (UUID) directly |
 
 ---
 

@@ -13,7 +13,56 @@ from percepxion_mcp.server import (
     list_organizations,
     list_tenants,
     get_devices_by_organization,
+    login_with_env,
 )
+
+
+# --- login_with_env / permitted_organization_ids capture ---
+
+def _mock_login(monkeypatch, httpserver, user_payload=None):
+    monkeypatch.setenv("PERCEPXION_USERNAME", "test-user")
+    monkeypatch.setenv("PERCEPXION_PASSWORD", "test-pass")
+    login_response = {"token": "tok-123", "csrf_token": "csrf-123"}
+    if user_payload is not None:
+        login_response["user"] = user_payload
+    httpserver.expect_request("/api/v2/user/login", method="POST").respond_with_json(
+        login_response, status=200
+    )
+
+
+def test_login_with_env_populates_permitted_organization_ids(monkeypatch, httpserver):
+    user_payload = {
+        "group": [
+            {"id": "g1", "name": "Org Admins", "tenant_id": "dddddddd-0000-0000-0000-000000000001"},
+            {"id": "g2", "name": "Org Viewers", "tenant_id": "dddddddd-0000-0000-0000-000000000002"},
+        ]
+    }
+    _mock_login(monkeypatch, httpserver, user_payload)
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = login_with_env()
+    assert result["ok"] is True
+    assert cm.session.permitted_organization_ids == {
+        "dddddddd-0000-0000-0000-000000000001",
+        "dddddddd-0000-0000-0000-000000000002",
+    }
+
+
+def test_login_with_env_degrades_gracefully_when_group_missing(monkeypatch, httpserver):
+    """No user.group in the login response should not crash login; permitted set stays empty."""
+    _mock_login(monkeypatch, httpserver, user_payload={})
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = login_with_env()
+    assert result["ok"] is True
+    assert cm.session.permitted_organization_ids == set()
+
+
+def test_login_with_env_degrades_gracefully_when_user_key_missing(monkeypatch, httpserver):
+    """No 'user' key at all in the login response should not crash login."""
+    _mock_login(monkeypatch, httpserver, user_payload=None)
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = login_with_env()
+    assert result["ok"] is True
+    assert cm.session.permitted_organization_ids == set()
 
 
 # --- send_direct_cli_command ---
@@ -183,6 +232,17 @@ def test_list_device_ports_sends_search_string_key(authed_session):
 
 
 # --- organization_id / tenant_id (deprecated alias) rename ---
+#
+# UUID-shaped values are used for these passthrough tests since a non-UUID
+# value now triggers organization-name resolution (see the dedicated
+# name-resolution tests further down).
+
+ORG_ABC_UUID = "aaaaaaaa-0000-0000-0000-000000000001"
+TENANT_LEGACY_UUID = "aaaaaaaa-0000-0000-0000-000000000002"
+ORG_WINS_UUID = "aaaaaaaa-0000-0000-0000-000000000003"
+TENANT_LOSES_UUID = "aaaaaaaa-0000-0000-0000-000000000004"
+DEFAULT_ORG_UUID = "aaaaaaaa-0000-0000-0000-000000000005"
+
 
 def test_organization_id_param_sent_as_tenant_id_in_payload(authed_session, httpserver):
     """New organization_id param resolves and is still sent as 'tenant_id' (API constraint)."""
@@ -190,10 +250,10 @@ def test_organization_id_param_sent_as_tenant_id_in_payload(authed_session, http
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
-        result = get_device_list(organization_id="org-abc")
+        result = get_device_list(organization_id=ORG_ABC_UUID)
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "org-abc"
+    assert req.get_json()["tenant_id"] == ORG_ABC_UUID
 
 
 def test_legacy_tenant_id_param_still_works(authed_session, httpserver):
@@ -201,10 +261,10 @@ def test_legacy_tenant_id_param_still_works(authed_session, httpserver):
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
-        result = get_device_list(tenant_id="tenant-legacy")
+        result = get_device_list(tenant_id=TENANT_LEGACY_UUID)
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "tenant-legacy"
+    assert req.get_json()["tenant_id"] == TENANT_LEGACY_UUID
 
 
 def test_organization_id_takes_precedence_over_legacy_tenant_id(authed_session, httpserver):
@@ -212,10 +272,10 @@ def test_organization_id_takes_precedence_over_legacy_tenant_id(authed_session, 
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
-        result = get_device_list(organization_id="org-wins", tenant_id="tenant-loses")
+        result = get_device_list(organization_id=ORG_WINS_UUID, tenant_id=TENANT_LOSES_UUID)
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "org-wins"
+    assert req.get_json()["tenant_id"] == ORG_WINS_UUID
 
 
 def test_default_organization_id_env_fallback_used_when_neither_supplied(authed_session, httpserver):
@@ -223,17 +283,27 @@ def test_default_organization_id_env_fallback_used_when_neither_supplied(authed_
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")), \
-         patch.object(cm, "DEFAULT_ORGANIZATION_ID", "default-org"):
+         patch.object(cm, "DEFAULT_ORGANIZATION_ID", DEFAULT_ORG_UUID):
         result = get_device_list()
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "default-org"
+    assert req.get_json()["tenant_id"] == DEFAULT_ORG_UUID
 
 
-def test_list_organizations_and_list_tenants_return_same_result(authed_session, httpserver):
-    """list_organizations is primary; list_tenants is a deprecated alias hitting the same endpoint."""
-    httpserver.expect_request("/api/v1/tenant/search", method="POST").respond_with_json(
-        {"tenants": [{"id": "org-1", "name": "Acme"}]}, status=200
+# --- list_organizations / list_tenants ---
+#
+# Rewritten: /v1/tenant/search does not exist server-side (400s in production).
+# IDs now come from session.permitted_organization_ids (login-derived RBAC);
+# names are best-effort, resolved by scanning visible devices via
+# /v3/device/search.
+
+def test_list_organizations_uses_permitted_ids_and_device_derived_names(authed_session, httpserver):
+    """list_organizations is primary; list_tenants is a deprecated alias with identical behavior."""
+    org_id = "bbbbbbbb-0000-0000-0000-000000000001"
+    authed_session.permitted_organization_ids = {org_id}
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": [{"device_id": "d1", "tenant": [{"id": org_id, "name": "Acme"}]}]},
+        status=200,
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
         org_result = list_organizations()
@@ -242,6 +312,34 @@ def test_list_organizations_and_list_tenants_return_same_result(authed_session, 
     assert org_result["ok"] is True
     assert tenant_result["ok"] is True
     assert org_result["data"] == tenant_result["data"]
+    assert org_result["data"]["organizations"] == [{"organization_id": org_id, "name": "Acme"}]
+
+
+def test_list_organizations_shows_permitted_org_with_no_visible_devices(authed_session, httpserver):
+    """An org with zero visible devices still appears (permission-derived ID), name is None."""
+    permitted_id = "bbbbbbbb-0000-0000-0000-000000000002"
+    authed_session.permitted_organization_ids = {permitted_id}
+    httpserver.expect_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": []}, status=200
+    )
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = list_organizations()
+    assert result["ok"] is True
+    assert result["data"]["organizations"] == [{"organization_id": permitted_id, "name": None}]
+
+
+def test_list_organizations_empty_permitted_set_returns_warning(authed_session):
+    authed_session.permitted_organization_ids = set()
+    result = list_organizations()
+    assert result["ok"] is True
+    assert result["data"]["organizations"] == []
+    assert "warning" in result["data"]
+
+
+def test_list_organizations_requires_auth():
+    result = list_organizations()
+    assert result["ok"] is False
+    assert "login_with_env" in result["error"]
 
 
 def test_get_devices_by_organization_requires_an_id():
@@ -255,10 +353,10 @@ def test_get_devices_by_organization_accepts_organization_id(authed_session, htt
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
-        result = get_devices_by_organization(organization_id="org-abc")
+        result = get_devices_by_organization(organization_id=ORG_ABC_UUID)
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "org-abc"
+    assert req.get_json()["tenant_id"] == ORG_ABC_UUID
 
 
 def test_get_devices_by_organization_accepts_legacy_tenant_id(authed_session, httpserver):
@@ -266,10 +364,38 @@ def test_get_devices_by_organization_accepts_legacy_tenant_id(authed_session, ht
         {"search_results": []}, status=200
     )
     with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
-        result = get_devices_by_organization(tenant_id="tenant-legacy")
+        result = get_devices_by_organization(tenant_id=TENANT_LEGACY_UUID)
     assert result["ok"] is True
     req = httpserver.log[-1][0]
-    assert req.get_json()["tenant_id"] == "tenant-legacy"
+    assert req.get_json()["tenant_id"] == TENANT_LEGACY_UUID
+
+
+# --- end-to-end: organization name resolves before hitting the target endpoint ---
+
+def test_get_device_list_resolves_organization_name_end_to_end(authed_session, httpserver):
+    """Calling a real tool with a name instead of a UUID resolves it via
+    /v3/device/search (permission-scoped) before the tool's own device-search call."""
+    org_id = "cccccccc-0000-0000-0000-000000000001"
+    authed_session.permitted_organization_ids = {org_id}
+
+    # First call: the harvesting/resolution pass used to resolve "Acme Corp" -> org_id.
+    # Second call: the actual get_device_list search, scoped by the resolved tenant_id.
+    httpserver.expect_ordered_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": [{"device_id": "d1", "tenant": [{"id": org_id, "name": "Acme Corp"}]}]},
+        status=200,
+    )
+    httpserver.expect_ordered_request("/api/v3/device/search", method="POST").respond_with_json(
+        {"search_results": [{"device_id": "d1", "device_name": "Router-A"}]},
+        status=200,
+    )
+
+    with patch.object(cm, "API_BASE_URL", httpserver.url_for("/api")):
+        result = get_device_list(organization_id="Acme Corp")
+
+    assert result["ok"] is True
+    # Final call must have been scoped to the resolved UUID, not the raw name.
+    req = httpserver.log[-1][0]
+    assert req.get_json()["tenant_id"] == org_id
 
 
 def test_list_device_ports_returns_port_data(authed_session, httpserver):
