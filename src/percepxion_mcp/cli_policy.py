@@ -92,6 +92,12 @@ def check_command(
     if not command or not command.strip():
         raise CLIPolicyViolation("Command cannot be empty.")
 
+    if re.search(r"[\r\n]", command):
+        raise CLIPolicyViolation(
+            "Command contains embedded newline/carriage-return characters, which is not allowed. "
+            "Submit one command per call."
+        )
+
     if len(command) > _max:
         raise CLIPolicyViolation(
             f"Command exceeds maximum length ({_max} chars). Got {len(command)}."

@@ -157,6 +157,43 @@ def test_shutdown_suffix_not_blocked_by_deny_list():
     check_command("no shutdown", write_enabled=True, yolo_mode=False)
 
 
+# --- embedded newline bypass ---
+
+def test_embedded_newline_between_read_commands_rejected():
+    with pytest.raises(CLIPolicyViolation, match="newline"):
+        check_command("show version\nreload", write_enabled=False, yolo_mode=False)
+
+
+def test_embedded_newline_deny_list_bypass_rejected():
+    with pytest.raises(CLIPolicyViolation, match="newline"):
+        check_command(
+            "show version\nreload\nwrite erase",
+            write_enabled=True,
+            yolo_mode=False,
+        )
+
+
+def test_embedded_crlf_rejected():
+    with pytest.raises(CLIPolicyViolation, match="newline"):
+        check_command("show version\r\nshow hostname", write_enabled=False, yolo_mode=False)
+
+
+def test_embedded_carriage_return_only_rejected():
+    with pytest.raises(CLIPolicyViolation, match="newline"):
+        check_command("show version\rreload", write_enabled=True, yolo_mode=False)
+
+
+def test_embedded_newline_rejected_even_in_yolo_mode():
+    # yolo mode disables deny-list/read-only checks, but embedded newlines are a
+    # basic input-sanity check (like empty/max-length) and must still be rejected.
+    with pytest.raises(CLIPolicyViolation, match="newline"):
+        check_command("show version\nreload", write_enabled=True, yolo_mode=True)
+
+
+def test_legitimate_single_line_command_still_allowed():
+    check_command("show version", write_enabled=False, yolo_mode=False)
+
+
 # --- deny list constants ---
 
 def test_default_deny_contains_expected_commands():
