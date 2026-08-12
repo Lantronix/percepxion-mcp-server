@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-08-12
 
 ### Added
 - `get_cli_command_output(job_group_id, device_id, organization_id=None)` tool: retrieves the actual CLI output text for a completed `send_direct_cli_command` job via `POST /v1/telemetry/result/search` (`type: "clicmd"`). This endpoint is absent from both local copies of Percepxion's OpenAPI spec, it was found by reading the WebUI's own console-editor source, which uses the same call to render command output in its result pane. Previously only job *status* was reachable via MQTT; the output text itself was believed unreachable via the API.
