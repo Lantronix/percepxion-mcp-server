@@ -90,10 +90,20 @@ def login_with_env() -> dict[str, Any]:
     session.csrf_token = csrf
 
     # Capture the RBAC-authoritative list of organizations this user has
-    # permission for (user.group[].tenant_id), used as the permission
-    # boundary for organization-name lookup. Degrade gracefully to an empty
-    # set if the field is missing/malformed rather than raising, name lookup
-    # will then correctly report "no permitted organizations available".
+    # permission for. Percepxion's hierarchy is Project > Portal >
+    # Organization(tenant), and role determines how that access is expressed
+    # in the login response:
+    #   - tenant_user: fine-grained, one group entry per permitted org
+    #     (user.group[].tenant_id).
+    #   - tenant_admin: full access to their own single org
+    #     (user.tenant_id), group[] may still be empty.
+    #   - project_admin: full access to every org under user.project_id, but
+    #     there is no endpoint that enumerates a project's member orgs, and
+    #     group[]/tenant_id are both empty for this role by design. Trust
+    #     /v3/device/search instead (see trust_harvested_organizations),
+    #     which the backend already scopes to what this session can see.
+    # Degrade gracefully (empty set, trust off) if fields are missing/
+    # malformed rather than raising.
     permitted_ids: set[str] = set()
     user = data.get("user") or {}
     groups = user.get("group") or []
@@ -102,10 +112,13 @@ def login_with_env() -> dict[str, Any]:
             tenant_id = group.get("tenant_id")
             if tenant_id:
                 permitted_ids.add(tenant_id)
+    if user.get("tenant_id"):
+        permitted_ids.add(user["tenant_id"])
     session.permitted_organization_ids = permitted_ids
+    session.trust_harvested_organizations = user.get("role") == "project_admin"
     logger.debug(
-        "Captured %d permitted_organization_ids from login response user.group",
-        len(permitted_ids),
+        "Captured %d permitted_organization_ids (role=%s, trust_harvested=%s)",
+        len(permitted_ids), user.get("role"), session.trust_harvested_organizations,
     )
 
     logger.info("Authenticated via %s provider", credential_provider)
@@ -224,18 +237,26 @@ def _list_organizations_impl(
     previous implementation of this tool called that dead endpoint and
     always failed. This implementation instead treats
     session.permitted_organization_ids (captured from the login response's
-    user.group[].tenant_id, i.e. this user's RBAC-authoritative organization
-    list) as the source of truth for IDs, and best-effort resolves display
-    names by scanning visible devices' embedded tenant info via
-    /v3/device/search. An organization with zero visible devices will still
-    appear (its ID is permission-derived, not device-derived) but with
-    name=None, since there is no other way to learn its display name.
+    user.group[].tenant_id / user.tenant_id, i.e. this user's RBAC-
+    authoritative organization list) as the source of truth for IDs, and
+    best-effort resolves display names by scanning visible devices' embedded
+    tenant info via /v3/device/search. An organization with zero visible
+    devices will still appear (its ID is permission-derived, not
+    device-derived) but with name=None, since there is no other way to learn
+    its display name.
+
+    For project_admin sessions, group[]/tenant_id are empty by design (that
+    role's access is granted at the project level, which Percepxion has no
+    endpoint to enumerate directly), so IDs are instead taken from whatever
+    /v3/device/search actually returns, that endpoint is already
+    backend-scoped to what the authenticated session can see.
     """
     if not session.is_authenticated():
         return _err("Not authenticated. Run login_with_env first.")
 
     permitted = session.permitted_organization_ids
-    if not permitted:
+    trust_harvested = session.trust_harvested_organizations
+    if not permitted and not trust_harvested:
         return _ok({
             "organizations": [],
             "total": 0,
@@ -253,9 +274,13 @@ def _list_organizations_impl(
         candidates = {}
         logger.warning("Could not resolve organization display names: %s", exc)
 
+    org_ids = set(permitted)
+    if trust_harvested:
+        org_ids |= candidates.keys()
+
     organizations = [
         {"organization_id": org_id, "name": candidates.get(org_id)}
-        for org_id in permitted
+        for org_id in org_ids
     ]
 
     if search_query and search_query != "*":

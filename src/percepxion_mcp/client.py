@@ -26,11 +26,21 @@ class PercepxionSession:
         self.auth_token: str | None = None
         self.csrf_token: str | None = None
         # organization_ids the authenticated user has RBAC permission for,
-        # captured from user.group[].tenant_id in the /v2/user/login response.
-        # This is the authoritative permission boundary for name-based
-        # organization lookup: a name match against an org the caller isn't
-        # permitted for must never be returned.
+        # captured from user.group[].tenant_id (and, for tenant_admin, the
+        # top-level user.tenant_id) in the /v2/user/login response. This is
+        # the authoritative permission boundary for name-based organization
+        # lookup for tenant_user/tenant_admin roles: a name match against an
+        # org outside this set must never be returned.
         self.permitted_organization_ids: set[str] = set()
+        # True when the authenticated user's role (project_admin) grants
+        # access to an entire Project's worth of organizations that Percepxion
+        # has no endpoint to enumerate directly. group[]/tenant_id are empty
+        # by design for this role, so permitted_organization_ids alone would
+        # incorrectly read as "zero organizations" for a real admin. When
+        # True, org visibility instead trusts whatever /v3/device/search
+        # actually returns for this session, since the backend already scopes
+        # that endpoint's results to what the authenticated user can see.
+        self.trust_harvested_organizations: bool = False
 
     def is_authenticated(self) -> bool:
         return bool(self.auth_token and self.csrf_token)
@@ -39,6 +49,7 @@ class PercepxionSession:
         self.auth_token = None
         self.csrf_token = None
         self.permitted_organization_ids = set()
+        self.trust_harvested_organizations = False
 
     def headers(self) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -129,32 +140,44 @@ def resolve_organization_by_name(name: str) -> str:
     Resolve an organization display name to its organization_id (UUID).
 
     Matching is case-insensitive and exact (no substring/fuzzy matching).
-    Every candidate is cross-checked against
-    session.permitted_organization_ids (the authenticated user's own
-    login-derived RBAC permissions) before being accepted; a name match for
-    an organization outside that set is rejected, not returned. This is a
-    hard security boundary: name-based lookup must never become a way to
-    discover organizations the caller isn't already entitled to.
+    Every candidate is cross-checked against session.permitted_organization_ids
+    (the authenticated user's own login-derived RBAC permissions) before being
+    accepted; a name match for an organization outside that set is rejected,
+    not returned. This is a hard security boundary: name-based lookup must
+    never become a way to discover organizations the caller isn't already
+    entitled to.
+
+    Exception: when session.trust_harvested_organizations is True (role ==
+    project_admin), permitted_organization_ids is empty by design (that role's
+    access isn't expressed via group[]), so any candidate actually harvested
+    from /v3/device/search is trusted instead, that endpoint is already
+    backend-scoped to devices the authenticated session can see.
 
     Raises OrganizationResolutionError if there are zero or multiple matches
     among the caller's permitted organizations.
     """
     candidates = _harvest_organization_candidates()
     permitted = session.permitted_organization_ids
+    trust_harvested = session.trust_harvested_organizations
     target = name.strip().lower()
 
     matches = sorted(
         org_id
         for org_id, org_name in candidates.items()
-        if org_name.strip().lower() == target and org_id in permitted
+        if org_name.strip().lower() == target and (org_id in permitted or trust_harvested)
     )
 
     if not matches:
+        scope_note = (
+            "your project's visible devices"
+            if trust_harvested
+            else f"your permitted organizations ({len(permitted)} available)"
+        )
         raise OrganizationResolutionError(
-            f"No organization named '{name}' found among your permitted organizations "
-            f"({len(permitted)} available, {len(candidates)} with a resolvable name from "
-            "visible devices). Name matching only covers organizations with at least one "
-            "visible device. Use the organization_id (UUID) directly instead, or call "
+            f"No organization named '{name}' found among {scope_note}, "
+            f"{len(candidates)} organization(s) have a resolvable name from visible devices. "
+            "Name matching only covers organizations with at least one visible device. "
+            "Use the organization_id (UUID) directly instead, or call "
             "list_organizations to see permitted organization_ids."
         )
     if len(matches) > 1:
