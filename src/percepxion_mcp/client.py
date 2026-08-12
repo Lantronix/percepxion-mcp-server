@@ -26,11 +26,34 @@ class PercepxionSession:
         self.auth_token: str | None = None
         self.csrf_token: str | None = None
         # organization_ids the authenticated user has RBAC permission for,
-        # captured from user.group[].tenant_id in the /v2/user/login response.
-        # This is the authoritative permission boundary for name-based
-        # organization lookup: a name match against an org the caller isn't
-        # permitted for must never be returned.
+        # captured from user.group[].tenant_id (and, for tenant_admin, the
+        # top-level user.tenant_id) in the /v2/user/login response. This is
+        # the authoritative permission boundary for name-based organization
+        # lookup for tenant_user/tenant_admin roles: a name match against an
+        # org outside this set must never be returned.
         self.permitted_organization_ids: set[str] = set()
+        # True when the authenticated user's role (project_admin) grants
+        # access to an entire Project's worth of organizations that Percepxion
+        # has no endpoint to enumerate directly. group[]/tenant_id are empty
+        # by design for this role, so permitted_organization_ids alone would
+        # incorrectly read as "zero organizations" for a real admin. When
+        # True, org visibility instead trusts whatever /v3/device/search
+        # actually returns for this session, since the backend already scopes
+        # that endpoint's results to what the authenticated user can see.
+        self.trust_harvested_organizations: bool = False
+        # True when the authenticated role is project_admin. Percepxion's own
+        # API docs state it directly for job/jobgroup/create ("The tenant_id
+        # field is only required when the API is called by a Project Admin
+        # user"), and it's been empirically confirmed for job/jobgroup/create,
+        # job/jobgroup/search, and telemetry/result/search: those calls 400
+        # with ACCESS_DENIED "Invalid access to tenant" for a project_admin
+        # session with no tenant_id, but succeed for tenant_user/tenant_admin
+        # sessions with no tenant_id (backend auto-scopes to their one org).
+        # Device-registry endpoints (/v3/device/search, /v3/device/get,
+        # /v3/port/search) were confirmed NOT to require it even for
+        # project_admin, so this flag is applied selectively per call site
+        # (see _resolve_organization's required= parameter), not globally.
+        self.requires_explicit_organization: bool = False
 
     def is_authenticated(self) -> bool:
         return bool(self.auth_token and self.csrf_token)
@@ -39,6 +62,8 @@ class PercepxionSession:
         self.auth_token = None
         self.csrf_token = None
         self.permitted_organization_ids = set()
+        self.trust_harvested_organizations = False
+        self.requires_explicit_organization = False
 
     def headers(self) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -129,32 +154,44 @@ def resolve_organization_by_name(name: str) -> str:
     Resolve an organization display name to its organization_id (UUID).
 
     Matching is case-insensitive and exact (no substring/fuzzy matching).
-    Every candidate is cross-checked against
-    session.permitted_organization_ids (the authenticated user's own
-    login-derived RBAC permissions) before being accepted; a name match for
-    an organization outside that set is rejected, not returned. This is a
-    hard security boundary: name-based lookup must never become a way to
-    discover organizations the caller isn't already entitled to.
+    Every candidate is cross-checked against session.permitted_organization_ids
+    (the authenticated user's own login-derived RBAC permissions) before being
+    accepted; a name match for an organization outside that set is rejected,
+    not returned. This is a hard security boundary: name-based lookup must
+    never become a way to discover organizations the caller isn't already
+    entitled to.
+
+    Exception: when session.trust_harvested_organizations is True (role ==
+    project_admin), permitted_organization_ids is empty by design (that role's
+    access isn't expressed via group[]), so any candidate actually harvested
+    from /v3/device/search is trusted instead, that endpoint is already
+    backend-scoped to devices the authenticated session can see.
 
     Raises OrganizationResolutionError if there are zero or multiple matches
     among the caller's permitted organizations.
     """
     candidates = _harvest_organization_candidates()
     permitted = session.permitted_organization_ids
+    trust_harvested = session.trust_harvested_organizations
     target = name.strip().lower()
 
     matches = sorted(
         org_id
         for org_id, org_name in candidates.items()
-        if org_name.strip().lower() == target and org_id in permitted
+        if org_name.strip().lower() == target and (org_id in permitted or trust_harvested)
     )
 
     if not matches:
+        scope_note = (
+            "your project's visible devices"
+            if trust_harvested
+            else f"your permitted organizations ({len(permitted)} available)"
+        )
         raise OrganizationResolutionError(
-            f"No organization named '{name}' found among your permitted organizations "
-            f"({len(permitted)} available, {len(candidates)} with a resolvable name from "
-            "visible devices). Name matching only covers organizations with at least one "
-            "visible device. Use the organization_id (UUID) directly instead, or call "
+            f"No organization named '{name}' found among {scope_note}, "
+            f"{len(candidates)} organization(s) have a resolvable name from visible devices. "
+            "Name matching only covers organizations with at least one visible device. "
+            "Use the organization_id (UUID) directly instead, or call "
             "list_organizations to see permitted organization_ids."
         )
     if len(matches) > 1:
@@ -165,7 +202,7 @@ def resolve_organization_by_name(name: str) -> str:
     return matches[0]
 
 
-def _resolve_organization(organization_id: str | None) -> str | None:
+def _resolve_organization(organization_id: str | None, *, required: bool = False) -> str | None:
     """
     Return caller-supplied organization_id, or the configured default.
 
@@ -175,6 +212,15 @@ def _resolve_organization(organization_id: str | None) -> str | None:
     permitted organizations. A UUID-shaped value skips resolution entirely
     (pure passthrough, no extra API call), exactly as before this feature
     existed.
+
+    required=True marks call sites where Percepxion's API itself rejects the
+    request with no tenant_id when the session is project_admin (see
+    session.requires_explicit_organization). When True and no organization_id
+    could be resolved for such a session, raises OrganizationResolutionError
+    with actionable guidance instead of letting the caller send a request
+    that's guaranteed to 400. Has no effect for tenant_user/tenant_admin
+    sessions, or for call sites confirmed not to need it (pass required=False,
+    the default, there).
     """
     value = organization_id
     if not value:
@@ -186,14 +232,21 @@ def _resolve_organization(organization_id: str | None) -> str | None:
             )
         value = DEFAULT_ORGANIZATION_ID
 
-    if value and not _is_uuid(value):
-        return resolve_organization_by_name(value)
-    return value
+    resolved = resolve_organization_by_name(value) if value and not _is_uuid(value) else value
+
+    if not resolved and required and session.requires_explicit_organization:
+        raise OrganizationResolutionError(
+            "organization_id is required for this call when authenticated as project_admin. "
+            "Percepxion does not implicitly scope this operation to a single tenant for that "
+            "role (project_admin sessions omitting tenant_id get ACCESS_DENIED from the API). "
+            "Pass organization_id explicitly, or call list_organizations to see available IDs."
+        )
+    return resolved
 
 
-def _resolve_tenant(tenant_id: str | None) -> str | None:
+def _resolve_tenant(tenant_id: str | None, *, required: bool = False) -> str | None:
     """Deprecated alias for _resolve_organization(). Kept for backward compatibility."""
-    return _resolve_organization(tenant_id)
+    return _resolve_organization(tenant_id, required=required)
 
 
 def _ok(data: Any, status_code: int | None = None) -> dict[str, Any]:

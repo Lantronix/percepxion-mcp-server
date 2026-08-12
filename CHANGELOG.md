@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 - 2026-08-12
+
+### Added
+- `get_cli_command_output(job_group_id, device_id, organization_id=None)` tool: retrieves the actual CLI output text for a completed `send_direct_cli_command` job via `POST /v1/telemetry/result/search` (`type: "clicmd"`). This endpoint is absent from both local copies of Percepxion's OpenAPI spec, it was found by reading the WebUI's own console-editor source, which uses the same call to render command output in its result pane. Previously only job *status* was reachable via MQTT; the output text itself was believed unreachable via the API.
+- `get_job_results_by_device(job_group_id, result_type="clicmd", ...)` tool: per-device result rollup for a multi-device job (e.g. a Smart Group firmware push or a CLI command sent to several devices at once) via the sibling endpoint `POST /v1/telemetry/result/device/search`.
+
+### Fixed
+- `list_organizations`/`list_tenants` and organization-name resolution reported zero permitted organizations for Project Admin accounts. Root cause: `session.permitted_organization_ids` was captured only from `user.group[].tenant_id` in the login response, which is empty by design for that role, Project Admin access is granted at the project level with no per-organization group entries, and Percepxion has no endpoint that enumerates a project's member organizations directly. Now trusts `/v3/device/search`'s backend-scoped results for Project Admin sessions instead of gating on the empty permission set. `user.tenant_id` (not just `group[].tenant_id`) is also now folded into the permitted set, covering the Tenant Admin single-organization case.
+- Job/telemetry/content/Smart-Group/audit tool calls silently omitted `organization_id`/`tenant_id` when the caller didn't supply one. Percepxion requires an explicit tenant scope on these calls for Project Admin accounts (`tenant_user`/`tenant_admin` accounts are auto-scoped to their one organization and are unaffected); omitting it previously surfaced as an opaque `400 ACCESS_DENIED: "Invalid access to tenant."` from the API. Affected tools now raise a clear, actionable error identifying the missing `organization_id` before making the request. Device-registry tools (`get_device_list`, `get_device_details`, `list_device_ports`) are unaffected, Percepxion doesn't require tenant scoping on those regardless of role.
+
 ## 1.0.0 - 2026-07-13
 
 ### Added
