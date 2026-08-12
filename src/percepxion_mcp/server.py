@@ -115,10 +115,19 @@ def login_with_env() -> dict[str, Any]:
     if user.get("tenant_id"):
         permitted_ids.add(user["tenant_id"])
     session.permitted_organization_ids = permitted_ids
-    session.trust_harvested_organizations = user.get("role") == "project_admin"
+    is_project_admin = user.get("role") == "project_admin"
+    session.trust_harvested_organizations = is_project_admin
+    # Percepxion's API requires an explicit tenant_id on job/telemetry/content/
+    # smartgroup/audit calls when the session is project_admin (documented for
+    # job/jobgroup/create, empirically confirmed for job/jobgroup/create,
+    # job/jobgroup/search, telemetry/result/search); tenant_user/tenant_admin
+    # sessions are auto-scoped to their one org and never need it. See
+    # _resolve_organization's required= parameter.
+    session.requires_explicit_organization = is_project_admin
     logger.debug(
-        "Captured %d permitted_organization_ids (role=%s, trust_harvested=%s)",
+        "Captured %d permitted_organization_ids (role=%s, trust_harvested=%s, requires_explicit_organization=%s)",
         len(permitted_ids), user.get("role"), session.trust_harvested_organizations,
+        session.requires_explicit_organization,
     )
 
     logger.info("Authenticated via %s provider", credential_provider)
@@ -211,7 +220,7 @@ def get_devices_by_organization(
     effective = _effective_org_id(organization_id, tenant_id)
     if not effective:
         return _err("Provide organization_id (or the deprecated tenant_id).")
-    resolved = _resolve_organization(effective)
+    resolved = _resolve_organization(effective, required=True)
     payload = {
         "search_string": "*",
         "offset": 0,
@@ -377,7 +386,7 @@ def import_and_assign_devices(devices: list[dict[str, Any]], organization_id: st
         }
         if device.get("device_description"):
             payload["device_description"] = device["device_description"]
-        if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+        if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
             payload["tenant_id"] = t
 
         logger.info("Device assign requested, device_id=%s device_name=%s", device["device_id"], device["device_name"])
@@ -393,7 +402,7 @@ def unassign_devices(device_ids: list[str], organization_id: str | None = None, 
     if not device_ids:
         return _err("device_ids list cannot be empty.")
     payload: dict[str, Any] = {"device_id": device_ids}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     logger.info("Device unassign requested, device_ids=%s", device_ids)
     return _api_post("/v3/device/unassign", json_body=payload)
@@ -443,7 +452,7 @@ def create_smart_group(
         payload["query_string"] = query
     if device_ids:
         payload["device_id"] = device_ids
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
 
     return _api_post("/v3/device/smartgroup/create", json_body=payload)
@@ -474,7 +483,7 @@ def list_smart_groups(
         "offset": max(0, offset),
         "limit": min(max(1, limit), 1000),
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v3/device/smartgroup/search", json_body=payload)
 
@@ -492,7 +501,7 @@ def delete_smart_group(smart_group_id: str, organization_id: str | None = None, 
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": smart_group_id}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     logger.info("Smart Group delete requested, smart_group_id=%s", smart_group_id)
     return _api_post("/v3/device/smartgroup/delete", json_body=payload)
@@ -509,8 +518,10 @@ def send_direct_cli_command(
     """
     Send a CLI command to one device via a Percepxion job group.
 
-    Commands run asynchronously. Use search_job_groups to retrieve output.
-    Commands are logged to stderr for audit purposes.
+    Commands run asynchronously. Poll search_job_groups or get_job_group for
+    job status (job_status_clone.state reaches "Completed"/"Failed"), then
+    call get_cli_command_output with this call's job_group_id to retrieve the
+    actual device output text. Commands are logged to stderr for audit purposes.
 
     Policy (configured via env vars):
     - Read-only by default (PERCEPXION_CLI_WRITE_ENABLED=false).
@@ -537,7 +548,7 @@ def send_direct_cli_command(
         return _err(str(exc))
 
     logger.info("CLI command dispatched, device_id=%s command=%r", device_id, command)
-    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id))
+    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)
     payload: dict[str, Any] = {
         "name": f"CLI_{device_id[:12]}_{int(time.time())}",
         "description": description,
@@ -551,6 +562,94 @@ def send_direct_cli_command(
     if effective_tenant_id:
         payload["tenant_id"] = effective_tenant_id
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
+
+
+@mcp.tool()
+def get_cli_command_output(
+    job_group_id: str,
+    device_id: str,
+    organization_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Retrieve the actual CLI output text for a completed send_direct_cli_command job.
+
+    Calls the same endpoint the Percepxion WebUI's device Console/console-editor
+    tab uses to render command output (POST /v1/telemetry/result/search,
+    type="clicmd"). This endpoint is undocumented in Percepxion's public API
+    spec, discovered by reading the WebUI's own source; MQTT only carries job
+    *status* ("Completed"/"Failed"), never the output text itself, this call
+    is required to get the actual response the device sent.
+
+    Call this after the job's status reaches "Completed" (poll search_job_groups
+    or get_job_group first). Calling before completion returns total_results=0,
+    not an error, retry after a short delay.
+
+    Args:
+        job_group_id: The job_group_id returned by send_direct_cli_command.
+        device_id: The Percepxion device ID the command was sent to.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
+    """
+    payload: dict[str, Any] = {
+        "type": "clicmd",
+        "job_group_id": [job_group_id],
+        "device_id": [device_id],
+        "offset": 0,
+        "limit": 1,
+    }
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
+        payload["tenant_id"] = t
+    resp = _api_post("/v1/telemetry/result/search", json_body=payload)
+    if resp["ok"] and not (resp["data"] or {}).get("total_results"):
+        resp["data"]["warning"] = (
+            "No result yet for this job_group_id/device_id. The job may still be running, "
+            "check status with get_job_group first, or the job may not be a CLI command job."
+        )
+    return resp
+
+
+@mcp.tool()
+def get_job_results_by_device(
+    job_group_id: str,
+    result_type: str = "clicmd",
+    search_query: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    organization_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List per-device results for a multi-device job group (e.g. a Smart Group
+    firmware push, config apply, or CLI command sent to several devices).
+
+    Calls POST /v1/telemetry/result/device/search, the sibling of the
+    get_cli_command_output endpoint used for single-device CLI output, without
+    a device_id filter it rolls up results across every device targeted by
+    the job. Use get_cli_command_output instead when you already know the
+    single device_id you want output for.
+
+    Args:
+        job_group_id: The job_group_id to look up results for.
+        result_type: Job result type, e.g. "clicmd" (CLI commands, default),
+            "script", or "command" depending on how the job was created.
+        search_query: Optional filter string (e.g. by device name).
+        limit: Number of results to return (1-1000).
+        offset: Pagination offset.
+        organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
+        tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
+    """
+    payload: dict[str, Any] = {
+        "type": result_type,
+        "job_group_id": [job_group_id],
+        "offset": max(0, offset),
+        "limit": min(max(1, limit), 1000),
+    }
+    if search_query:
+        payload["search_string"] = search_query
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
+        payload["tenant_id"] = t
+    return _api_post("/v1/telemetry/result/device/search", json_body=payload)
 
 
 @mcp.tool()
@@ -576,7 +675,7 @@ def update_device_config(
         "device_id": [device_id],
         "items": items,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         save_payload["tenant_id"] = t
 
     logger.info(
@@ -597,7 +696,7 @@ def update_device_config(
         "device_id": [device_id],
         "enable": True,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
     job_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
@@ -613,7 +712,7 @@ def _resolve_template_id(template_name: str, source_device_id: str, organization
         "sort": "name",
         "order": "desc",
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
 
     resp = _api_post("/v1/telemetry/template/search", json_body=payload)
@@ -648,7 +747,7 @@ def clone_device_config(
         "device_id": source_device_id,
         "selected_config_group": record_names,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         template_payload["tenant_id"] = t
 
     logger.info(
@@ -677,7 +776,7 @@ def clone_device_config(
         "device_id": [target_device_id],
         "enable": True,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
     apply_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
@@ -742,7 +841,7 @@ def reboot_device(
         "device_id": [device_id],
         "enable": True,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     logger.info("Device reboot requested, device_id=%s", device_id)
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
@@ -767,7 +866,7 @@ def get_device_config(
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/config/get", json_body=payload)
 
@@ -809,7 +908,7 @@ def request_device_syslog_upload(
         "enable": True,
         "log_request": log_request,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
@@ -846,7 +945,7 @@ def get_security_telemetry(device_id: str, selected: bool = True, organization_i
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/stat/view", json_body=payload)
 
@@ -879,7 +978,7 @@ def investigate_audit_logs(
     }
     if usernames:
         payload["username"] = usernames
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/audit/search", json_body=payload)
 
@@ -902,7 +1001,7 @@ def investigate_user_audit_logs(
         "sort": sort,
         "order": order,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/audit/user/search", json_body=payload)
 
@@ -947,7 +1046,7 @@ def update_firmware_by_smart_group(
         "enable": enable,
         "smart_group_id": smart_group_ids,
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         data_payload["tenant_id"] = t
 
     try:
@@ -994,7 +1093,7 @@ def list_firmware_content(
         "offset": max(0, offset),
         "limit": min(max(1, limit), 1000),
     }
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v3/content/search", json_body=payload)
 
@@ -1030,7 +1129,7 @@ def list_templates(
     }
     if device_id:
         payload["device_id"] = [device_id]
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/telemetry/template/search", json_body=payload)
 
@@ -1048,7 +1147,7 @@ def delete_template(template_id: str, organization_id: str | None = None, tenant
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"id": template_id}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     logger.info("Template delete requested, template_id=%s", template_id)
     return _api_post("/v1/telemetry/template/delete", json_body=payload)
@@ -1065,7 +1164,7 @@ def search_job_groups(
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Search job groups to monitor asynchronous operation progress."""
-    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id))
+    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)
     payload: dict[str, Any] = {
         "search_string": search_string,
         "type": job_type,
@@ -1093,7 +1192,7 @@ def get_job_group(job_group_id: str, organization_id: str | None = None, tenant_
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"job_group_id": job_group_id}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/job/jobgroup/get", json_body=payload)
 
@@ -1183,7 +1282,7 @@ def get_port_telemetry(
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
     payload: dict[str, Any] = {"device_id": device_id, "selected": True}
-    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id))):
+    if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     raw = _api_post("/v1/telemetry/stat/view", json_body=payload)
 
