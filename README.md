@@ -27,7 +27,7 @@ This MCP server gives AI assistants direct access to Percepxion's management cap
 
 The server runs locally and communicates with the Percepxion API over HTTPS. Authentication uses username/password; the server exchanges these for session tokens and holds them in memory for the lifetime of the process.
 
-Many Percepxion operations are asynchronous. Tools that trigger device actions (CLI commands, config pushes, firmware updates, syslog requests) create a Percepxion job group and return the job record. Use `search_job_groups` or `get_job_group` to poll status and retrieve results.
+Many Percepxion operations are asynchronous. Tools that trigger device actions (CLI commands, config pushes, firmware updates, syslog requests) create a Percepxion job group and return the job record. Use `search_job_groups` or `get_job_group` to poll status. Neither of those returns CLI output text, once a CLI command job reaches `"Completed"`, call `get_cli_command_output` for the actual device response.
 
 **Response envelope, all tools return this structure:**
 
@@ -228,6 +228,8 @@ Most tools accept an `organization_id` parameter to scope the call. The older `t
 
 `organization_id`/`tenant_id` accept either a UUID or an exact (case-insensitive) organization name. Name resolution only works for organizations with at least one visible device (it's derived from device search results, there's no dedicated organization-lookup endpoint), and is always scoped to your own login-derived permissions, a name match for an organization you aren't permitted for is rejected, not returned. If a name matches zero or more than one permitted organization, the tool call fails with a clear error instead of guessing; use the `organization_id` (UUID) directly to disambiguate.
 
+**Project Admin accounts:** Percepxion requires an explicit `organization_id` on job/telemetry/content/Smart-Group/audit calls when the authenticated account is a Project Admin, that role's access spans every organization in the project, so Percepxion can't infer a single default the way it does for `tenant_user`/`tenant_admin` accounts (auto-scoped to their one organization, `organization_id` is optional for those). Omitting it as a Project Admin now raises a clear error instead of a generic API rejection; call `list_organizations` first to find the ID to pass. Device-inventory tools (`get_device_list`, `get_device_details`, `list_device_ports`) don't require it for any role.
+
 ### Device inventory
 
 | Tool | Description |
@@ -257,6 +259,7 @@ Most tools accept an `organization_id` parameter to scope the call. The older `t
 | Tool | Description | Async? |
 |---|---|---|
 | `send_direct_cli_command` | Send a CLI command to one device. Read-only by default (see CLI policy above). Commands are audit-logged. | Yes, use `get_job_group` |
+| `get_cli_command_output` | Retrieve the actual CLI output text for a completed `send_direct_cli_command` job. Poll `search_job_groups`/`get_job_group` for status first; calling before the job completes returns `total_results: 0`, not an error. | No, call after the job completes |
 
 ### Device configuration
 
@@ -308,6 +311,7 @@ Most tools accept an `organization_id` parameter to scope the call. The older `t
 |---|---|
 | `search_job_groups` | Search and poll async job status by name prefix. |
 | `get_job_group` | Get full job output and results by job group ID. |
+| `get_job_results_by_device` | Per-device result rollup for a multi-device job (e.g. a Smart Group firmware push or a CLI command sent to several devices at once). Use `get_cli_command_output` instead when you already know the single device you want output for. |
 
 ### Async job workflow
 
@@ -317,8 +321,11 @@ When a tool creates a job, it returns a job group record immediately:
 1. Call the action tool (e.g. send_direct_cli_command)
    → Returns: { "ok": true, "data": { "id": "jg-abc123", "name": "CLI_dev001_1748000000" } }
 
-2. Call get_job_group with the id
-   → Returns: full job output, per-device results, and status
+2. Call get_job_group (or search_job_groups) with the id to poll status
+   → Status reaches "Completed" or "Failed"
+
+3. For CLI commands specifically, call get_cli_command_output with the same job_group_id and device_id
+   → Returns: the actual output text the device sent back
 ```
 
 Job names include a Unix timestamp suffix to avoid collisions when multiple jobs run against the same device.
@@ -377,6 +384,8 @@ This server executes operations on network infrastructure. Treat it accordingly.
 | "No permitted organizations available" when resolving an organization name | Login response had no `user.group` entries, or `login_with_env` wasn't called | Call `login_with_env` first; confirm the account has organization group membership in Percepxion |
 | Organization name resolves to "0 matches" | The org has no visible devices (name resolution is device-derived), or the name doesn't match any organization you're permitted for | Use `list_organizations` to find the `organization_id` (UUID) directly and pass that instead |
 | Organization name resolves to "ambiguous, multiple matches" | Two or more permitted organizations share the same name | Use `list_organizations` to disambiguate and pass the `organization_id` (UUID) directly |
+| "`organization_id` is required for this call when authenticated as project_admin" | Project Admin account, `organization_id` not supplied on a job/telemetry/content/Smart-Group/audit call | Pass `organization_id` explicitly; use `list_organizations` to find it |
+| `get_cli_command_output` returns `total_results: 0` | Job hasn't reached "Completed" yet, or the job isn't a CLI command job | Poll `get_job_group`/`search_job_groups` until status is "Completed", then retry |
 
 ---
 
