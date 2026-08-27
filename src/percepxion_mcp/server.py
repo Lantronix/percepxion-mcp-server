@@ -861,14 +861,20 @@ def get_device_config(
 
     Args:
         device_id: Percepxion device ID (from get_device_list).
-        selected: If True, return only the user-selected config items.
+        selected: Retained for backward compatibility; ignored. The config/edit
+            endpoint always returns the full editable config tree.
         organization_id: Scope to a specific organization. Accepts either a UUID or an exact (case-insensitive) organization name.
         tenant_id: Deprecated alias for organization_id, kept for backward compatibility.
     """
-    payload: dict[str, Any] = {"device_id": device_id, "selected": selected}
+    # /v1/telemetry/config/get is device-token authenticated (device auth_token
+    # header) and rejects user tokens with 401 "Invalid device token size".
+    # The user-callable endpoint for reading a device's current config is
+    # /v1/telemetry/config/edit, verified live 2026-08-27. It returns
+    # {device_id, last_fetched, config_record: [{..., field: [{..., value}]}]}.
+    payload: dict[str, Any] = {"device_id": device_id}
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
-    return _api_post("/v1/telemetry/config/get", json_body=payload)
+    return _api_post("/v1/telemetry/config/edit", json_body=payload)
 
 
 @mcp.tool()
