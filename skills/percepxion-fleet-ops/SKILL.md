@@ -1,7 +1,7 @@
 ---
 name: percepxion-fleet-ops
 description: "Operate Lantronix out-of-band (OOB) infrastructure through the Percepxion MCP server: device inventory, serial port and managed-device inspection, CLI diagnostics on SLC/EMG console servers, firmware compliance and rollout, config management, security auditing, and evidence collection for incident response. Use this skill whenever the user mentions Percepxion, Lantronix console servers (SLC9000, SLC8000, EMG), out-of-band or OOB management, serial consoles, firmware compliance for console servers, or wants an AI agent to reach network devices when the production network path is unavailable, even if they don't name a specific tool."
-version: 1.0.0
+version: 1.1.0
 license: MIT
 ---
 
@@ -57,6 +57,18 @@ This skill operates on two distinct device types. Confusing them causes wrong to
 **Read before you write.** Confirm the OOB device with `get_device_list`/`get_device_details`, and confirm the target port shows the expected managed device with `get_security_telemetry` or `get_port_telemetry` before any action that touches it.
 
 **Never expose credentials** (`PERCEPXION_USERNAME`, `PERCEPXION_PASSWORD`, `VAULT_TOKEN`, session tokens) in output, logs, or error messages.
+
+---
+
+## Platform Behavior You Can't Infer From the Tools
+
+Three things about how Percepxion works underneath the tools, so you read results correctly instead of mistaking platform behavior for a tool bug.
+
+- **Events are entirely rule-driven.** Percepxion raises an event only when a configured rule's condition matches. A device going offline, a port dropping, a config drift, none of it generates an event unless a rule watches for it. So a quiet event/audit stream is not evidence of a healthy fleet, and "Percepxion didn't alert on X" only means no rule covered X. When an operator expects an alert that isn't there, check whether a rule exists before concluding nothing happened. Event latency also tracks each device's status-update interval (often ~2 minutes), so a state change shorter than one cycle can produce no event at all.
+
+- **Some device operations are authenticated by the device's own firmware token, not your session.** A handful of low-level device endpoints (direct device config fetch, device-side connect/disconnect) require a token the device firmware generates, which no user session can produce. That is by design and it's why there is no interactive "log in as the device" path, and why device configuration goes through the fleet tools (`get_device_config`, `update_device_config`, `clone_device_config`) rather than a device-credential login. If you find yourself wanting a raw device token to reach an endpoint, stop: the fleet tool is the supported path.
+
+- **Transient `500`s on some telemetry reads are a known platform-side condition, not a malformed call.** If a telemetry or property read returns a 500 while the same-shaped call succeeds elsewhere, treat it as a server-side issue: retry once, and if it persists, surface it to the operator as a platform problem rather than reformatting the request or reporting the tool broken. A `400` that names an expected type IS your request shape, fix that; a bare `500` on a valid shape is theirs.
 
 ---
 
