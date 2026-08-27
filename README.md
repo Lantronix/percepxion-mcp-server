@@ -204,6 +204,20 @@ If `get_device_list` returns devices, the server is working.
 
 ---
 
+## Claude skill
+
+[`skills/percepxion-fleet-ops/SKILL.md`](skills/percepxion-fleet-ops/SKILL.md) packages the operational knowledge for this server: OOB-device vs managed-device disambiguation, the async job output pattern, role-based `organization_id` rules, preflight discipline, and safety defaults. With the skill installed, Claude uses the tools correctly on the first try instead of rediscovering these patterns.
+
+Install for all your projects:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/percepxion-fleet-ops ~/.claude/skills/
+```
+
+Or copy into a single project's `.claude/skills/` directory. The same file can be uploaded to claude.ai as a skill. Keep the skill in sync when tools change: `tests/test_skill_doc.py` fails the suite if tool names drift.
+
+---
+
 ## Tool reference
 
 Full reference in [`docs/tools.md`](docs/tools.md). Summary below.

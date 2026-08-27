@@ -39,3 +39,4 @@ htmlcov/
 
 # AI workflow tooling (implementation plans, agent artifacts)
 docs/superpowers/
+.firecrawl/

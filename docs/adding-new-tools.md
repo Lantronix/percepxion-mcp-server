@@ -137,6 +137,7 @@ Update these docs when you add tools:
 
 - `README.md` tool catalog section
 - `docs/tools.md` summary table
+- `skills/percepxion-fleet-ops/SKILL.md` if the change affects usage patterns, parameters, or safety behavior. `tests/test_skill_doc.py` fails when tool names in the skill drift from `server.py`, but behavior text is on you: update it in the same PR.
 
 ### 9. Smoke test
 

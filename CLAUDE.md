@@ -14,6 +14,7 @@ When a user asks for help setting up, follow these steps in order:
    - `env` (default): credentials in .env file
    - `vault`: HashiCorp Vault, ask for VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH
    - `aws`: AWS Secrets Manager, ask for AWS_SECRET_NAME, AWS_REGION
+   - `cyberark`: CyberArk CCP, ask for CYBERARK_URL, CYBERARK_APP_ID, CYBERARK_SAFE, CYBERARK_OBJECT
 4. **Create .env**: Copy `.env.example` to `.env` and populate with their values.
 5. **Install dependencies**: Run `pip install -e .` in the repo directory.
 6. **Add to MCP client config**: Use the appropriate template from `config/` for their client and OS. For Claude Desktop, add the JSON block to `claude_desktop_config.json`.
@@ -25,11 +26,16 @@ When a user asks for help setting up, follow these steps in order:
 - `src/percepxion_mcp/client.py`, HTTP session and helpers
 - `src/percepxion_mcp/config.py`, environment variable reads
 - `src/percepxion_mcp/cli_policy.py`, CLI command policy (read-only default)
-- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws)
+- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws/cyberark)
 - `config/`, example MCP client config files
 - `config/setup-instructions.md`, detailed setup reference
 - `docs/tools.md`, full tool reference
 - `docs/adding-new-tools.md`, guide for adding new tools
+- `skills/percepxion-fleet-ops/SKILL.md`, Claude skill packaging usage patterns and safety rules
+
+## Keeping the Skill in Sync
+
+When a change adds, renames, removes, or alters the behavior of any tool, update `skills/percepxion-fleet-ops/SKILL.md` in the same change. `tests/test_skill_doc.py` fails the suite when tool names in the skill drift from `server.py`; behavior text (async patterns, role rules, policy defaults, version claims) must be reviewed manually.
 
 ## API Endpoints
 

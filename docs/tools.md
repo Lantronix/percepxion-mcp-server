@@ -4,7 +4,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 
 ## Tool count summary
 
-- Total tools: 35 (32 active + 3 deprecated aliases)
+- Total tools: 37 (36 active + 1 deprecated alias)
 - Source file: `src/percepxion_mcp/server.py`
 
 ## Quick usage rules
@@ -58,15 +58,17 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 | Audit | `investigate_user_audit_logs` | Yes | `POST /v1/audit/user/search` | None |
 | Jobs | `search_job_groups` | Yes | `POST /v1/job/jobgroup/search` | None |
 | Jobs | `get_job_group` | Yes | `POST /v1/job/jobgroup/get` | None |
+| Jobs | `get_cli_command_output` | Yes | `POST /v1/telemetry/result/search` (`type: "clicmd"`) | None |
+| Jobs | `get_job_results_by_device` | Yes | `POST /v1/telemetry/result/device/search` | None |
 | Credentials | `reconfigure_credentials` | Yes | Credential provider runtime switch | None |
 
 ### Deprecated aliases (still functional, use replacements)
 
 | Deprecated tool | Replacement |
 |---|---|
-| `send_cli_command` | `send_direct_cli_command` |
-| `automate_smart_group` | `create_smart_group` |
 | `list_tenants` | `list_organizations` |
+
+(`send_cli_command` and `automate_smart_group` were removed; use `send_direct_cli_command` and `create_smart_group`.)
 
 ## CLI Command Policy
 
