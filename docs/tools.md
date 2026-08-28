@@ -56,6 +56,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 | Security | `get_port_telemetry` | Yes | `POST /v1/telemetry/stat/view` (filtered) | None |
 | Audit | `investigate_audit_logs` | Yes | `POST /v1/audit/search` | None |
 | Audit | `investigate_user_audit_logs` | Yes | `POST /v1/audit/user/search` | None |
+| Access Control | `set_user_access` | Yes | `POST /v2/user/search` + `PUT /v1/user` | None |
 | Jobs | `search_job_groups` | Yes | `POST /v1/job/jobgroup/search` | None |
 | Jobs | `get_job_group` | Yes | `POST /v1/job/jobgroup/get` | None |
 | Jobs | `get_cli_command_output` | Yes | `POST /v1/telemetry/result/search` (`type: "clicmd"`) | None |

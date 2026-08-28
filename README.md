@@ -318,6 +318,7 @@ Most tools accept an `organization_id` parameter to scope the call. The older `t
 | `get_port_telemetry` | Retrieve telemetry for a single port. Returns a structured managed-device object for that port only, faster and cheaper than `get_security_telemetry` when only one port is needed. |
 | `investigate_audit_logs` | Search platform audit records by user, time range, or keyword. |
 | `investigate_user_audit_logs` | Search user records with last recorded audit action per user. |
+| `set_user_access` | Suspend or resume user access in bulk (lockdown remediation after an investigation). Suspend/resume only, never create or delete; idempotent; high blast radius, requires explicit operator confirmation. |
 
 ### Job tracking
 

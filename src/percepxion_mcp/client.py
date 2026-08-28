@@ -54,6 +54,13 @@ class PercepxionSession:
         # project_admin, so this flag is applied selectively per call site
         # (see _resolve_organization's required= parameter), not globally.
         self.requires_explicit_organization: bool = False
+        # Per-login correlation id. Generated at login_with_env and stamped into
+        # MCP server logs and the audit `description` of device-facing job
+        # actions, so a sequence of MCP-brokered actions can be traced back to
+        # one authenticated session in both the MCP logs and the Percepxion
+        # audit trail. This is an MCP-side aid only; it does not reach the
+        # device firmware audit log.
+        self.correlation_id: str | None = None
 
     def is_authenticated(self) -> bool:
         return bool(self.auth_token and self.csrf_token)
@@ -64,6 +71,7 @@ class PercepxionSession:
         self.permitted_organization_ids = set()
         self.trust_harvested_organizations = False
         self.requires_explicit_organization = False
+        self.correlation_id = None
 
     def headers(self) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -306,6 +314,42 @@ def _api_post(
             json=json_body,
             data=form_data,
             files=files,
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        logger.error("Request failed for %s: %s", path, exc)
+        return _err(f"Request failed for {path}: {exc}")
+
+    payload = _extract_json(response)
+    if response.status_code == 401:
+        logger.warning("Token expired for %s, session cleared", path)
+        session.clear()
+        return _err("Unauthorized or token expired. Run login_with_env again.", 401, payload)
+    if response.status_code >= 400:
+        logger.error("API error %s for %s", response.status_code, path)
+        return _err(f"API error for {path}", response.status_code, payload)
+    return _ok(payload, response.status_code)
+
+
+def _api_put(
+    path: str,
+    *,
+    json_body: dict[str, Any] | None = None,
+    require_auth: bool = True,
+) -> dict[str, Any]:
+    """PUT sibling of _api_post for the handful of endpoints that require PUT
+    (e.g. /v1/user suspend/resume). JSON body only."""
+    if require_auth:
+        login_err = _require_login()
+        if login_err:
+            return login_err
+
+    headers = session.headers()
+    try:
+        response = requests.put(
+            _url(path),
+            headers=headers,
+            json=json_body,
             timeout=REQUEST_TIMEOUT,
         )
     except requests.RequestException as exc:

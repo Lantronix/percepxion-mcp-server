@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-08-27
+
+### Added
+- `set_user_access(usernames, enabled, organization_id=None)` tool: suspends (`enabled=false`) or resumes (`enabled=true`) Percepxion user access in bulk via `POST /v2/user/search` (resolve usernames to IDs and current state) + `PUT /v1/user` (verified live against Percepxion 6.13). This is the remediation companion to `investigate_user_audit_logs`: investigate an incident, confirm with the operator, then suspend. Suspend/resume only, never create or delete. Idempotent (users already in the target state are left alone), reports unknown usernames instead of failing, and carries the same operator-confirmation expectation as CLI and firmware actions.
+- Session `correlation_id`: `login_with_env` now generates a per-login correlation id, returns it, and logs it. The id is appended to the audit `description` of MCP-brokered device commands (`send_direct_cli_command`), so a sequence of actions in one session is traceable in both the MCP server logs and the Percepxion audit trail. This is an MCP-side audit aid; it does not reach the console server's own firmware audit log.
+- `_api_put` client helper for the endpoints that require HTTP PUT (`PUT /v1/user`).
+
 ## 1.1.0 - 2026-08-12
 
 ### Added

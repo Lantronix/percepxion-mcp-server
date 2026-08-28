@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from .config import (
 from .client import (
     session,
     _api_post,
+    _api_put,
     _ok,
     _err,
     _resolve_organization,
@@ -130,8 +132,25 @@ def login_with_env() -> dict[str, Any]:
         session.requires_explicit_organization,
     )
 
-    logger.info("Authenticated via %s provider", credential_provider)
-    return _ok({"message": "Authenticated successfully.", "username": creds["username"]})
+    session.correlation_id = uuid.uuid4().hex[:16]
+    logger.info(
+        "Authenticated via %s provider (session correlation id: %s)",
+        credential_provider, session.correlation_id,
+    )
+    return _ok({
+        "message": "Authenticated successfully.",
+        "username": creds["username"],
+        "correlation_id": session.correlation_id,
+    })
+
+
+def _audit_description(description: str) -> str:
+    """Append the per-login correlation id to an audit description so an
+    MCP-brokered device action is traceable to one session in both the MCP
+    logs and the Percepxion audit trail. No-op if not yet authenticated."""
+    if session.correlation_id:
+        return f"{description} [mcp-session:{session.correlation_id}]"
+    return description
 
 
 @mcp.tool()
@@ -547,11 +566,14 @@ def send_direct_cli_command(
     except CLIPolicyViolation as exc:
         return _err(str(exc))
 
-    logger.info("CLI command dispatched, device_id=%s command=%r", device_id, command)
+    logger.info(
+        "CLI command dispatched, device_id=%s command=%r correlation_id=%s",
+        device_id, command, session.correlation_id,
+    )
     effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)
     payload: dict[str, Any] = {
         "name": f"CLI_{device_id[:12]}_{int(time.time())}",
-        "description": description,
+        "description": _audit_description(description),
         "enable": True,
         "type": "command",
         "subtype": "cli",
@@ -1010,6 +1032,87 @@ def investigate_user_audit_logs(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         payload["tenant_id"] = t
     return _api_post("/v1/audit/user/search", json_body=payload)
+
+
+@mcp.tool()
+def set_user_access(
+    usernames: list[str],
+    enabled: bool,
+    organization_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Suspend or resume access for one or more Percepxion user accounts (lockdown).
+
+    Use this to disable access during an incident or for offboarding, and to
+    restore it afterward. This is the remediation companion to
+    investigate_user_audit_logs / investigate_audit_logs: investigate first,
+    confirm with the operator, then act. It suspends and resumes only; it does
+    NOT create or delete accounts.
+
+    High blast radius: suspending an account cuts off that user's Percepxion
+    access fleet-wide. Never call this without explicit operator confirmation
+    (same rule as send_direct_cli_command and firmware updates).
+
+    Idempotent: users already in the requested state are reported unchanged and
+    left alone. Unknown usernames are reported, not failed.
+
+    Args:
+        usernames: Usernames to act on.
+        enabled: True to resume (restore) access, False to suspend it.
+        organization_id: Scope to a specific organization. Accepts a UUID or an
+            exact (case-insensitive) organization name. Falls back to
+            PERCEPXION_DEFAULT_ORGANIZATION_ID.
+        tenant_id: Deprecated alias for organization_id.
+    """
+    if not usernames:
+        return _err("usernames must be a non-empty list.")
+
+    effective_tenant_id = _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)
+
+    search_payload: dict[str, Any] = {"offset": 0, "limit": 1000, "sort": "username", "order": "asc"}
+    if effective_tenant_id:
+        search_payload["tenant_id"] = effective_tenant_id
+    search = _api_post("/v2/user/search", json_body=search_payload)
+    if not search["ok"]:
+        return search
+
+    by_name = {u["username"]: u for u in search["data"].get("result", []) if "username" in u}
+    requested = list(dict.fromkeys(usernames))  # dedupe, preserve order
+    to_change: list[dict[str, Any]] = []
+    unchanged: list[str] = []
+    not_found: list[str] = []
+    for name in requested:
+        user = by_name.get(name)
+        if user is None:
+            not_found.append(name)
+        elif bool(user.get("enabled")) == bool(enabled):
+            unchanged.append(name)
+        else:
+            to_change.append({"user_id": user["id"], "name": name})
+
+    action = "resume" if enabled else "suspend"
+    logger.warning(
+        "User access %s requested via MCP: change=%s unchanged=%s not_found=%s correlation_id=%s",
+        action, [u["name"] for u in to_change], unchanged, not_found, session.correlation_id,
+    )
+
+    if to_change:
+        put_payload: dict[str, Any] = {
+            "users": [{"user_id": u["user_id"], "enable": bool(enabled)} for u in to_change],
+        }
+        if effective_tenant_id:
+            put_payload["tenant_id"] = effective_tenant_id
+        resp = _api_put("/v1/user", json_body=put_payload)
+        if not resp["ok"]:
+            return resp
+
+    return _ok({
+        "action": action,
+        "changed": [u["name"] for u in to_change],
+        "unchanged": unchanged,
+        "not_found": not_found,
+    })
 
 
 @mcp.tool()
