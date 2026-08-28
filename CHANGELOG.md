@@ -10,7 +10,7 @@
 ## 1.1.0 - 2026-08-12
 
 ### Added
-- `get_cli_command_output(job_group_id, device_id, organization_id=None)` tool: retrieves the actual CLI output text for a completed `send_direct_cli_command` job via `POST /v1/telemetry/result/search` (`type: "clicmd"`). This endpoint is absent from both local copies of Percepxion's OpenAPI spec, it was found by reading the WebUI's own console-editor source, which uses the same call to render command output in its result pane. Previously only job *status* was reachable via MQTT; the output text itself was believed unreachable via the API.
+- `get_cli_command_output(job_group_id, device_id, organization_id=None)` tool: retrieves the actual CLI output text for a completed `send_direct_cli_command` job via `POST /v1/telemetry/result/search` (`type: "clicmd"`). Previously only job *status* was retrievable through this server; the output text itself was not.
 - `get_job_results_by_device(job_group_id, result_type="clicmd", ...)` tool: per-device result rollup for a multi-device job (e.g. a Smart Group firmware push or a CLI command sent to several devices at once) via the sibling endpoint `POST /v1/telemetry/result/device/search`.
 
 ### Fixed
