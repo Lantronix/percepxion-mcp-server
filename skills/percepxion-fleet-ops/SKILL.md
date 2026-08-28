@@ -1,17 +1,17 @@
 ---
 name: percepxion-fleet-ops
 description: "Operate Lantronix out-of-band (OOB) infrastructure through the Percepxion MCP server: device inventory, serial port and managed-device inspection, CLI diagnostics on SLC/EMG console servers, firmware compliance and rollout, config management, security auditing, and evidence collection for incident response. Use this skill whenever the user mentions Percepxion, Lantronix console servers (SLC9000, SLC8000, EMG), out-of-band or OOB management, serial consoles, firmware compliance for console servers, or wants an AI agent to reach network devices when the production network path is unavailable, even if they don't name a specific tool."
-version: 1.1.0
+version: 1.2.0
 license: MIT
 ---
 
 # Percepxion Fleet Operations
 
-This skill covers the **percepxion-mcp-server**, which manages Lantronix out-of-band infrastructure fleet-wide through the Percepxion SaaS platform (37 tools). For direct, synchronous access to a single SLC console server over its own REST API, use the companion **slc-mcp-server** and its `slc-device-ops` skill (https://github.com/Lantronix/slc-mcp-server). The capability split table near the end shows which server to route each job to.
+This skill covers the **percepxion-mcp-server**, which manages Lantronix out-of-band infrastructure fleet-wide through the Percepxion SaaS platform (38 tools). For direct, synchronous access to a single SLC console server over its own REST API, use the companion **slc-mcp-server** and its `slc-device-ops` skill (https://github.com/Lantronix/slc-mcp-server). The capability split table near the end shows which server to route each job to.
 
 Full per-tool parameter reference: `docs/tools.md` in this repository. This skill covers usage patterns, disambiguation, and safety; read `docs/tools.md` when you need exact parameters for a tool not shown here.
 
-**Version requirement:** percepxion-mcp-server v1.1.0 or later. `get_cli_command_output` (retrieve actual CLI output text) and role-aware `organization_id` enforcement were added in v1.1.0 and this skill assumes both.
+**Version requirement:** percepxion-mcp-server v1.2.0 or later. `get_cli_command_output` (retrieve actual CLI output text) and role-aware `organization_id` enforcement arrived in v1.1.0; `set_user_access` (suspend/resume user access) and the session `correlation_id` arrived in v1.2.0. This skill assumes all of them.
 
 ---
 
@@ -57,6 +57,14 @@ This skill operates on two distinct device types. Confusing them causes wrong to
 **Read before you write.** Confirm the OOB device with `get_device_list`/`get_device_details`, and confirm the target port shows the expected managed device with `get_security_telemetry` or `get_port_telemetry` before any action that touches it.
 
 **Never expose credentials** (`PERCEPXION_USERNAME`, `PERCEPXION_PASSWORD`, `VAULT_TOKEN`, session tokens) in output, logs, or error messages.
+
+---
+
+## Session Correlation ID
+
+`login_with_env` returns a `correlation_id` for the session and logs it. That id is also appended to the audit `description` of MCP-brokered device commands (`send_direct_cli_command`), so a sequence of actions in one authenticated session can be traced in both the MCP server logs and the Percepxion audit trail. Record it in the incident ticket when you open a session.
+
+This is an MCP-side audit aid only. It does not reach the console server's own firmware audit log, so it is not a substitute for a device-side session identifier; correlating cloud activity with the device's local audit record is a platform/firmware capability, not something this server can stamp.
 
 ---
 
@@ -169,6 +177,7 @@ All commands target the SLC itself via `send_direct_cli_command` + the async pat
 - `get_security_telemetry(device_id)`: telemetry for one OOB device (not fleet-wide).
 - `investigate_audit_logs`: no `device_id` parameter; filter by device with `search_string`, by users with `usernames` (list). Dates are `from_date`/`to_date` (`YYYY-MM-DD`); omitted dates mean all history.
 - `investigate_user_audit_logs(user_filter=...)`: user records with last-action summaries; no date parameters.
+- `set_user_access(usernames, enabled)`: suspend (`enabled=false`) or resume (`enabled=true`) user access in bulk. This is the remediation step after an investigation flags a compromised or departing account: investigate, confirm with the operator, then suspend. Idempotent (users already in the target state are left alone), reports unknown usernames instead of failing, and is suspend/resume only, never create or delete. High blast radius: treat it like a CLI or firmware action and never call it without explicit operator confirmation.
 - `download_device_access_log(device_id)` for forensic export / SIEM ingestion; `query_device_access_log(device_id, query=...)` for targeted event search.
 
 ## Workflow 6: Configuration Management (OOB devices, not managed devices)
@@ -193,7 +202,7 @@ When an upstream system (monitoring, ticketing, or an orchestration platform suc
 2. Run Workflow 2 preflight on the target port.
 3. **Before-evidence:** `get_device_syslogs`.
 4. Diagnostics via Workflow 3, always carrying the upstream incident ID in `description`.
-5. Remediation commands only if the server was started with `PERCEPXION_CLI_WRITE_ENABLED=true`, and only after presenting the command to the operator or orchestrator. Verify via `get_cli_command_output`, not job status.
+5. Remediation commands only if the server was started with `PERCEPXION_CLI_WRITE_ENABLED=true`, and only after presenting the command to the operator or orchestrator. Verify via `get_cli_command_output`, not job status. If the incident implicates a user account (compromised or needs offboarding), `set_user_access(usernames, enabled=false)` suspends access, again only after explicit confirmation; resume later with `enabled=true`.
 6. **After-evidence:** `investigate_audit_logs(search_string=<device>)`; include the excerpt in the incident record.
 7. Report a structured outcome upstream: job group ID, before/after evidence, final status (`remediated` / `diagnosed-only` / `escalate-to-human`).
 
