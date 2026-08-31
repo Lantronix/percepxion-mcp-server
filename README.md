@@ -2,6 +2,14 @@
 
 A Python [FastMCP](https://github.com/jlowin/fastmcp) server that exposes the [Percepxion](https://percepxion.ai) REST API as MCP tools. Connect it to Claude Desktop, Claude Code, or any MCP-compatible client to manage out-of-band infrastructure through natural language.
 
+## Experimental: API-token authentication
+
+Setting `PERCEPXION_API_TOKEN` switches the server to API-token mode:
+`login_with_env` skips the login call and every request authenticates with an
+`Authorization: Bearer` header and no CSRF header. This targets a proposed
+Percepxion capability that is not yet available on the backend; until it
+ships, leave the variable unset and use username/password login.
+
 ## What is Percepxion?
 
 Percepxion is a SaaS platform for out-of-band (OOB) network device management. It connects to console servers, serial port aggregators, and remote access devices to provide fleet-wide visibility, configuration management, firmware updates, CLI access, and compliance reporting, independent of the primary network path.

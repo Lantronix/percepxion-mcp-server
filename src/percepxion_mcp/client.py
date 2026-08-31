@@ -25,6 +25,9 @@ class PercepxionSession:
     def __init__(self) -> None:
         self.auth_token: str | None = None
         self.csrf_token: str | None = None
+        # Experimental API-token mode (proposed backend capability): when set,
+        # requests authenticate with Authorization: Bearer and no CSRF header.
+        self.api_token: str | None = None
         # organization_ids the authenticated user has RBAC permission for,
         # captured from user.group[].tenant_id (and, for tenant_admin, the
         # top-level user.tenant_id) in the /v2/user/login response. This is
@@ -63,11 +66,12 @@ class PercepxionSession:
         self.correlation_id: str | None = None
 
     def is_authenticated(self) -> bool:
-        return bool(self.auth_token and self.csrf_token)
+        return bool(self.api_token or (self.auth_token and self.csrf_token))
 
     def clear(self) -> None:
         self.auth_token = None
         self.csrf_token = None
+        self.api_token = None
         self.permitted_organization_ids = set()
         self.trust_harvested_organizations = False
         self.requires_explicit_organization = False
@@ -78,6 +82,10 @@ class PercepxionSession:
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        if self.api_token:
+            # API-token mode: bearer auth only, no CSRF (proposed contract).
+            headers["Authorization"] = f"Bearer {self.api_token}"
+            return headers
         if self.auth_token:
             headers["x-mystq-token"] = self.auth_token
         if self.csrf_token:

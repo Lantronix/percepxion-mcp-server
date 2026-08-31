@@ -67,6 +67,26 @@ def login_with_env() -> dict[str, Any]:
     import os
     from .providers import get_provider
 
+    api_token = os.getenv("PERCEPXION_API_TOKEN")
+    if api_token:
+        # Experimental API-token mode (proposed backend capability): no login
+        # call, bearer auth, no CSRF. A token session has no login response to
+        # read role/org scoping from, so trust what the backend returns for
+        # this session (same posture as project_admin org harvesting).
+        session.clear()
+        session.api_token = api_token
+        session.trust_harvested_organizations = True
+        session.correlation_id = uuid.uuid4().hex[:16]
+        logger.info(
+            "Authenticated via API token (experimental mode; session correlation id: %s)",
+            session.correlation_id,
+        )
+        return _ok({
+            "message": "Authenticated with API token (experimental mode).",
+            "auth_mode": "api_token",
+            "correlation_id": session.correlation_id,
+        })
+
     credential_provider = os.getenv("PERCEPXION_CREDENTIAL_PROVIDER", "env")
     try:
         provider = get_provider(credential_provider)
