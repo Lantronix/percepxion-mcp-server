@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Continuous integration** (`.github/workflows/ci.yml`): every pull request and push to `main` runs the test suite on Python 3.11 and 3.12 against the hash-verified lockfile, a `pip-audit` scan of locked dependencies, a `gitleaks` scan of full git history, and a container build. The dependency audit also re-runs weekly. Workflow actions are pinned to commit SHAs and kept current by Dependabot.
+- **Pull request template** with the verification checklist expected before review.
+
+### Fixed
+- **Lockfile now resolves for every supported Python** (`requirements.txt`): it was compiled on Python 3.12 only, so `pip install -r requirements.txt` failed hash verification on Python 3.11 (`backports.tarfile` unpinned), even though `requires-python` is `>=3.11`. Regenerated as a universal lockfile with platform and version markers.
+
+### Security
+- PyJWT 2.13.0 to 2.15.1 and urllib3 2.7.0 to 2.8.0 in the lockfile, resolving published advisories reported by `pip-audit`. No other pinned versions changed.
+
 ## 1.2.0 - 2026-08-27
 
 ### Added
