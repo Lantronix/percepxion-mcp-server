@@ -4,7 +4,7 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 
 ## Tool count summary
 
-- Total tools: 37 (36 active + 1 deprecated alias)
+- Total tools: 38 (37 active + 1 deprecated alias)
 - Source file: `src/percepxion_mcp/server.py`
 
 ## Quick usage rules
