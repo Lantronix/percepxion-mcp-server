@@ -77,10 +77,17 @@ The server blocks and waits for an MCP client connection. Connect a client, then
 
 ### Docker
 
+The image serves both remote transports on port 8765, Streamable HTTP at `/mcp` and legacy SSE at `/sse`, as an unprivileged user. Because it listens on `0.0.0.0`, it needs a client token and the host names clients use, or it refuses to start:
+
 ```bash
 docker build -t percepxion-mcp-server .
-docker run --rm -it --env-file .env percepxion-mcp-server
+docker run --rm -p 8765:8765 --env-file .env \
+  -e MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
+  -e MCP_ALLOWED_HOSTS=mcp.example.com \
+  percepxion-mcp-server
 ```
+
+Mount firmware files read-only and set `PERCEPXION_FIRMWARE_DIR` to use `update_firmware_by_smart_group`; without it, that tool is disabled on remote transports.
 
 ---
 
@@ -96,8 +103,23 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
 | `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, or `cyberark`. |
+| `MCP_TRANSPORT` | No | `stdio` (`both` in the Docker image) | `stdio` for a local client; `http` for Streamable HTTP at `/mcp`; `sse` for legacy HTTP+SSE at `/sse` (messages under `/messages/`); `both` to serve `http` and `sse` from one process. |
+| `MCP_HOST` / `MCP_PORT` | No | `127.0.0.1` / `8765` (`0.0.0.0` in the Docker image) | Listen address for the HTTP transports. Any non-loopback address needs `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`. |
+| `MCP_AUTH_TOKEN` / `MCP_AUTH_TOKEN_FILE` | For non-loopback | , | Bearer token every HTTP request must send (`Authorization: Bearer ...`), at least 16 characters, compared in constant time. `_FILE` reads it from a file (Docker secrets). |
+| `MCP_ALLOW_UNAUTHENTICATED` | No | `false` | Set `1` to run a non-loopback HTTP transport without a token. Logged as a security warning at start-up. Use only behind a gateway that authenticates clients. |
+| `MCP_STATELESS_HTTP` | No | `false` | Streamable HTTP keeps a session per client (`Mcp-Session-Id`), so run a single replica. Set `true` to answer each request on its own, for load-balanced replicas. |
+| `MCP_ALLOWED_HOSTS` | For non-loopback | , | Comma-separated host names or addresses clients use to reach the server (wildcards allowed, for example `*.example.com`). On a non-loopback address every request's `Host` must match, which blocks DNS rebinding. |
+| `MCP_ALLOWED_ORIGINS` | No | , | Comma-separated origins allowed to call the server from a browser. A request with any other `Origin` (except one matching its own allowed host) is refused. |
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
+
+### Experimental: API-token authentication
+
+Setting `PERCEPXION_API_TOKEN` switches the server to API-token mode:
+`login_with_env` skips the login call and every request authenticates with an
+`Authorization: Bearer` header and no CSRF header. This targets a proposed
+Percepxion capability that is not yet available on the backend; until it
+ships, leave the variable unset and use username/password login.
 
 ### CLI command policy
 
@@ -192,6 +214,19 @@ Copy `config/claude_desktop_config.example.json`, fill in your paths, and place 
 ### Claude Desktop (Windows + WSL)
 
 Use `config/claude_desktop_config.wsl_windows.example.json`. Replace the path placeholder with the WSL path to this repo.
+
+### Remote clients (Streamable HTTP or SSE)
+
+Run the server with `MCP_TRANSPORT=both` (the Docker default), `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`, then point clients at it with the token. Streamable HTTP is the current MCP transport; use SSE only for clients that don't support it yet.
+
+```bash
+# Claude Code, Streamable HTTP
+claude mcp add --transport http percepxion http://mcp-host:8765/mcp --header "Authorization: Bearer $MCP_AUTH_TOKEN"
+# Claude Code, legacy SSE
+claude mcp add --transport sse percepxion http://mcp-host:8765/sse --header "Authorization: Bearer $MCP_AUTH_TOKEN"
+```
+
+Other clients take the same URLs (`/mcp` for Streamable HTTP, `/sse` for SSE) and the same `Authorization` header. The token travels in clear over plain HTTP, so put the server behind TLS (a reverse proxy) when clients connect across a network you don't control.
 
 ### First connection check
 
@@ -366,7 +401,14 @@ This server executes operations on network infrastructure. Treat it accordingly.
 
 **Firmware uploads:**
 - `update_firmware_by_smart_group` reads a local file path and uploads it to Percepxion.
-- Set `PERCEPXION_FIRMWARE_DIR` to restrict uploads to a specific directory. Without this, any file the server process can read can be uploaded.
+- Set `PERCEPXION_FIRMWARE_DIR` to restrict uploads to a specific directory. Paths are resolved (symlinks included) and anything outside that directory is refused before the server checks whether it exists. On stdio without this variable, any file the server process can read can be uploaded.
+- On the remote transports the tool is disabled until `PERCEPXION_FIRMWARE_DIR` is set.
+
+**Remote transports (http, sse, both):**
+- Every request needs `Authorization: Bearer <MCP_AUTH_TOKEN>`. On a non-loopback address the server refuses to start without a token unless `MCP_ALLOW_UNAUTHENTICATED=1` is set, which it logs as a security warning.
+- On a non-loopback address `MCP_ALLOWED_HOSTS` is required, and the `Host` and `Origin` of every request are checked against it (DNS-rebinding protection).
+- The server listens on `127.0.0.1` unless `MCP_HOST` says otherwise.
+- **Known limitation: one Percepxion identity.** Every client that holds the token acts as the server's single Percepxion account. Percepxion audit records show that account, not the person behind the MCP client, and the token grants every tool the account's role allows. Give each group of users its own server instance and account when that matters, and keep write access off with the CLI policy above.
 
 **Token handling:**
 - Auth tokens are stored in memory only and are never written to disk.
