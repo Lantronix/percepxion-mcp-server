@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+- **Streamable HTTP transport** at `/mcp`, the current MCP transport. `MCP_TRANSPORT=both` serves it and the legacy SSE transport (`/sse`, messages under `/messages/`) from one process, so existing SSE clients keep working while new clients move to Streamable HTTP. `MCP_TRANSPORT=http` serves Streamable HTTP only; `sse` and `stdio` behave as before. The Docker image now defaults to `both` on port 8765.
+- `MCP_STATELESS_HTTP` (answer each Streamable HTTP request without a session, for load-balanced replicas) and `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` (Host and Origin allowlists for the HTTP transports).
+- **Experimental API-token authentication**, off unless `PERCEPXION_API_TOKEN` is set: `login_with_env` skips the login call and requests send `Authorization: Bearer` with no CSRF header. It targets a proposed Percepxion capability that isn't available on the backend yet; leave it unset and use username and password login.
+
+### Changed
+- FastMCP 3.4.7 to 3.4.11 (latest 3.x) and the rest of the lockfile refreshed within the existing ranges, among them starlette 1.6.0 to 1.10.0, uvicorn 0.52.1 to 0.54.0, pydantic 2.13.4 to 2.14.2 and sse-starlette 3.4.8 to 3.6.0. The MCP SDK stays at 1.30.0, the latest 1.x. FastMCP 4 and MCP SDK 2 implement the 2026-07-28 protocol revision and are a separate upgrade.
+- `uvicorn` is now a declared dependency (the HTTP transports start it directly).
+
+### Security
+- Lockfile updates resolve advisories reported by `pip-audit`: FastMCP GHSA-7xgj-8392-5q4r (fixed in 3.4.10), Authlib (nine advisories, fixed by 1.9.2), certifi PYSEC-2026-4320 (2026.10.23), dnspython CVE-2026-114605 (2.9.1), joserfc CVE-2026-119283 and CVE-2026-119284 (1.7.7) and opentelemetry-api CVE-2026-114603 (1.45.2). FastMCP 3.4.8 also applies Host and Origin protection to the SSE transport. `pip-audit` reports no known vulnerabilities in the new lockfile.
+
 ## 1.2.1 - 2026-10-19
 
 ### Added

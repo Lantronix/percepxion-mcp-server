@@ -13,5 +13,7 @@ COPY . .
 # question that can't be resolved from the app-level RBAC docs alone. Add a USER
 # directive once the production bind-mount permissions for PERCEPXION_FIRMWARE_DIR
 # are confirmed readable by the non-root user.
+# Remote transports by default: Streamable HTTP at /mcp and legacy SSE at /sse.
+ENV MCP_TRANSPORT=both MCP_HOST=0.0.0.0 MCP_PORT=8765
 EXPOSE 8765
 CMD ["python", "percepxion_mcp.py"]

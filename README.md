@@ -2,14 +2,6 @@
 
 A Python [FastMCP](https://github.com/jlowin/fastmcp) server that exposes the [Percepxion](https://percepxion.ai) REST API as MCP tools. Connect it to Claude Desktop, Claude Code, or any MCP-compatible client to manage out-of-band infrastructure through natural language.
 
-## Experimental: API-token authentication
-
-Setting `PERCEPXION_API_TOKEN` switches the server to API-token mode:
-`login_with_env` skips the login call and every request authenticates with an
-`Authorization: Bearer` header and no CSRF header. This targets a proposed
-Percepxion capability that is not yet available on the backend; until it
-ships, leave the variable unset and use username/password login.
-
 ## What is Percepxion?
 
 Percepxion is a SaaS platform for out-of-band (OOB) network device management. It connects to console servers, serial port aggregators, and remote access devices to provide fleet-wide visibility, configuration management, firmware updates, CLI access, and compliance reporting, independent of the primary network path.
@@ -85,10 +77,14 @@ The server blocks and waits for an MCP client connection. Connect a client, then
 
 ### Docker
 
+The image serves both remote transports on port 8765: Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
+
 ```bash
 docker build -t percepxion-mcp-server .
-docker run --rm -it --env-file .env percepxion-mcp-server
+docker run --rm -p 8765:8765 --env-file .env percepxion-mcp-server
 ```
+
+The server has no client authentication of its own. Anyone who reaches the port can use the tools with the server's Percepxion account, so publish it only on a trusted network or behind a gateway that authenticates clients.
 
 ---
 
@@ -104,8 +100,20 @@ docker run --rm -it --env-file .env percepxion-mcp-server
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
 | `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, or `cyberark`. |
+| `MCP_TRANSPORT` | No | `stdio` (`both` in the Docker image) | `stdio` for a local client; `http` for Streamable HTTP at `/mcp`; `sse` for legacy HTTP+SSE at `/sse` (messages under `/messages/`); `both` to serve `http` and `sse` from one process. |
+| `MCP_HOST` / `MCP_PORT` | No | `0.0.0.0` / `8765` | Listen address for the HTTP transports. |
+| `MCP_STATELESS_HTTP` | No | `false` | Streamable HTTP keeps a session per client (`Mcp-Session-Id`), so run a single replica. Set `true` to answer each request on its own, for load-balanced replicas. |
+| `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | No |, | Comma-separated `Host` and `Origin` allowlists for the HTTP transports. When empty they're checked only if the server listens on a loopback address. |
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
+
+### Experimental: API-token authentication
+
+Setting `PERCEPXION_API_TOKEN` switches the server to API-token mode:
+`login_with_env` skips the login call and every request authenticates with an
+`Authorization: Bearer` header and no CSRF header. This targets a proposed
+Percepxion capability that is not yet available on the backend; until it
+ships, leave the variable unset and use username/password login.
 
 ### CLI command policy
 
@@ -200,6 +208,19 @@ Copy `config/claude_desktop_config.example.json`, fill in your paths, and place 
 ### Claude Desktop (Windows + WSL)
 
 Use `config/claude_desktop_config.wsl_windows.example.json`. Replace the path placeholder with the WSL path to this repo.
+
+### Remote clients (Streamable HTTP or SSE)
+
+Run the server with `MCP_TRANSPORT=both` (the Docker default), then point clients at it. Streamable HTTP is the current MCP transport; use SSE only for clients that don't support it yet.
+
+```bash
+# Claude Code, Streamable HTTP
+claude mcp add --transport http percepxion http://mcp-host:8765/mcp
+# Claude Code, legacy SSE
+claude mcp add --transport sse percepxion http://mcp-host:8765/sse
+```
+
+Other clients take the same URLs: `http://mcp-host:8765/mcp` for Streamable HTTP, `http://mcp-host:8765/sse` for SSE.
 
 ### First connection check
 

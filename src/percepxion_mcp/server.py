@@ -1509,14 +1509,53 @@ def firmware_compliance_report(
     )
 
 
+HTTP_TRANSPORTS = ("http", "sse", "both")
+
+
+def build_http_app(
+    transport: str,
+    stateless_http: bool = False,
+    allowed_hosts: list[str] | None = None,
+    allowed_origins: list[str] | None = None,
+):
+    """ASGI app for the remote transports.
+
+    http: Streamable HTTP at /mcp. sse: legacy HTTP+SSE at /sse (messages under
+    /messages/). both: one app serving both, so existing SSE clients keep working
+    while new clients use Streamable HTTP. The Streamable HTTP app's lifespan
+    starts the server lifespan and its session manager, which covers SSE too.
+    """
+    if transport not in HTTP_TRANSPORTS:
+        raise ValueError(f"MCP_TRANSPORT must be stdio, http, sse or both, not {transport!r}")
+    protect = {"allowed_hosts": allowed_hosts or None, "allowed_origins": allowed_origins or None}
+    if transport == "sse":
+        return mcp.http_app(path="/sse", transport="sse", **protect)
+    app = mcp.http_app(path="/mcp", transport="http", stateless_http=stateless_http, **protect)
+    if transport == "both":
+        sse = mcp.http_app(path="/sse", transport="sse", **protect)
+        app.router.routes.extend(sse.routes)
+    return app
+
+
 def main() -> None:
     """Run the FastMCP server."""
-    from .config import MCP_HOST, MCP_PORT, MCP_TRANSPORT
+    from .config import (
+        MCP_ALLOWED_HOSTS,
+        MCP_ALLOWED_ORIGINS,
+        MCP_HOST,
+        MCP_PORT,
+        MCP_STATELESS_HTTP,
+        MCP_TRANSPORT,
+    )
 
-    if MCP_TRANSPORT == "sse":
-        mcp.run(transport="sse", host=MCP_HOST, port=MCP_PORT)
-    else:
+    if MCP_TRANSPORT in ("", "stdio"):
         mcp.run()
+        return
+    app = build_http_app(MCP_TRANSPORT, MCP_STATELESS_HTTP, MCP_ALLOWED_HOSTS, MCP_ALLOWED_ORIGINS)
+
+    import uvicorn
+
+    uvicorn.run(app, host=MCP_HOST, port=MCP_PORT, log_level="info", lifespan="on")
 
 
 if __name__ == "__main__":
