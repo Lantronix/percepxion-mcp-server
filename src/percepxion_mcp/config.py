@@ -28,9 +28,7 @@ MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 # Streamable HTTP keeps a session per client (Mcp-Session-Id) by default, so run
 # one replica. MCP_STATELESS_HTTP=true answers each request on its own instead.
 MCP_STATELESS_HTTP: bool = os.getenv("MCP_STATELESS_HTTP", "false").strip().lower() in ("1", "true", "yes")
-# Optional comma-separated Host and Origin allowlists for the HTTP transports.
-# Empty keeps FastMCP's default: checked only when bound to a loopback address.
-MCP_ALLOWED_HOSTS: list[str] = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
-MCP_ALLOWED_ORIGINS: list[str] = [o.strip() for o in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
-MCP_HOST: str = os.getenv("MCP_HOST", "0.0.0.0")
+# Loopback by default. Any other address needs MCP_AUTH_TOKEN and MCP_ALLOWED_HOSTS
+# (see remote_security.py).
+MCP_HOST: str = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT: int = int(os.getenv("MCP_PORT", "8765"))

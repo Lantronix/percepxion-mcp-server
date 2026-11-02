@@ -1153,11 +1153,14 @@ def update_firmware_by_smart_group(
     if not smart_group_ids:
         return _err("smart_group_ids cannot be empty.")
 
+    if REMOTE_TRANSPORT and not FIRMWARE_DIR:
+        return _err(
+            "Firmware upload is disabled on remote transports until PERCEPXION_FIRMWARE_DIR "
+            "names the directory that holds firmware files."
+        )
+    # Resolve symlinks first, then confine to the allowed directory before
+    # anything else, so paths outside it reveal nothing about what exists.
     firmware_path = Path(firmware_file_path).resolve()
-    if not firmware_path.exists():
-        return _err(f"Firmware file not found: {firmware_file_path}")
-    if not firmware_path.is_file():
-        return _err(f"Firmware path is not a file: {firmware_file_path}")
     if FIRMWARE_DIR:
         allowed = Path(FIRMWARE_DIR).resolve()
         if not firmware_path.is_relative_to(allowed):
@@ -1165,6 +1168,10 @@ def update_firmware_by_smart_group(
                 f"Firmware file is outside the allowed directory ({FIRMWARE_DIR}). "
                 "Set PERCEPXION_FIRMWARE_DIR to the directory containing your firmware files."
             )
+    if not firmware_path.exists():
+        return _err(f"Firmware file not found: {firmware_file_path}")
+    if not firmware_path.is_file():
+        return _err(f"Firmware path is not a file: {firmware_file_path}")
 
     data_payload: dict[str, Any] = {
         "name": content_name,
@@ -1509,7 +1516,9 @@ def firmware_compliance_report(
     )
 
 
-HTTP_TRANSPORTS = ("http", "sse", "both")
+# Set by main() when an HTTP transport is used: tools that touch local files
+# then require an explicit allowed directory.
+REMOTE_TRANSPORT = False
 
 
 def build_http_app(
@@ -1517,6 +1526,8 @@ def build_http_app(
     stateless_http: bool = False,
     allowed_hosts: list[str] | None = None,
     allowed_origins: list[str] | None = None,
+    auth_token: str | None = None,
+    validate_every_request: bool = False,
 ):
     """ASGI app for the remote transports.
 
@@ -1524,34 +1535,62 @@ def build_http_app(
     /messages/). both: one app serving both, so existing SSE clients keep working
     while new clients use Streamable HTTP. The Streamable HTTP app's lifespan
     starts the server lifespan and its session manager, which covers SSE too.
+
+    auth_token adds bearer-token authentication to every route.
+    validate_every_request makes the Host/Origin guard check every request
+    (used for non-loopback binds) instead of FastMCP's loopback-only default.
     """
+    from starlette.middleware import Middleware
+
+    from .remote_security import HTTP_TRANSPORTS, BearerAuthMiddleware
+
     if transport not in HTTP_TRANSPORTS:
         raise ValueError(f"MCP_TRANSPORT must be stdio, http, sse or both, not {transport!r}")
-    protect = {"allowed_hosts": allowed_hosts or None, "allowed_origins": allowed_origins or None}
+    opts = {
+        "allowed_hosts": allowed_hosts or None,
+        "allowed_origins": allowed_origins or None,
+        "host_origin_protection": True if validate_every_request else "auto",
+        "middleware": [Middleware(BearerAuthMiddleware, token=auth_token)] if auth_token else None,
+    }
     if transport == "sse":
-        return mcp.http_app(path="/sse", transport="sse", **protect)
-    app = mcp.http_app(path="/mcp", transport="http", stateless_http=stateless_http, **protect)
+        return mcp.http_app(path="/sse", transport="sse", **opts)
+    app = mcp.http_app(path="/mcp", transport="http", stateless_http=stateless_http, **opts)
     if transport == "both":
-        sse = mcp.http_app(path="/sse", transport="sse", **protect)
+        sse = mcp.http_app(path="/sse", transport="sse", **opts)
         app.router.routes.extend(sse.routes)
     return app
 
 
 def main() -> None:
     """Run the FastMCP server."""
-    from .config import (
-        MCP_ALLOWED_HOSTS,
-        MCP_ALLOWED_ORIGINS,
-        MCP_HOST,
-        MCP_PORT,
-        MCP_STATELESS_HTTP,
-        MCP_TRANSPORT,
-    )
+    global REMOTE_TRANSPORT
+    from .config import MCP_HOST, MCP_PORT, MCP_STATELESS_HTTP, MCP_TRANSPORT
+    from .remote_security import RemoteConfigError, check_remote_settings, settings_from_env
 
     if MCP_TRANSPORT in ("", "stdio"):
         mcp.run()
         return
-    app = build_http_app(MCP_TRANSPORT, MCP_STATELESS_HTTP, MCP_ALLOWED_HOSTS, MCP_ALLOWED_ORIGINS)
+    try:
+        settings = settings_from_env(MCP_TRANSPORT, MCP_HOST)
+        check_remote_settings(settings)
+    except RemoteConfigError as e:
+        logger.error("refusing to start: %s", e)
+        raise SystemExit(2) from e
+    REMOTE_TRANSPORT = True
+    if not FIRMWARE_DIR:
+        logger.warning(
+            "PERCEPXION_FIRMWARE_DIR is not set: update_firmware_by_smart_group is disabled on the "
+            "%s transport.",
+            MCP_TRANSPORT,
+        )
+    app = build_http_app(
+        MCP_TRANSPORT,
+        stateless_http=MCP_STATELESS_HTTP,
+        allowed_hosts=settings.allowed_hosts,
+        allowed_origins=settings.allowed_origins,
+        auth_token=settings.token,
+        validate_every_request=settings.remote_bind,
+    )
 
     import uvicorn
 

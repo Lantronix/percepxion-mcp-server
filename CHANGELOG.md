@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Breaking
+- **Remote transports need client authentication.** The HTTP transports (`http`, `sse`, `both`) now require `Authorization: Bearer <MCP_AUTH_TOKEN>` on every request. On a non-loopback `MCP_HOST` the server refuses to start without `MCP_AUTH_TOKEN` (or `MCP_AUTH_TOKEN_FILE`) and without `MCP_ALLOWED_HOSTS`. To upgrade an existing SSE deployment: set both variables, then add the `Authorization` header to every client. `MCP_ALLOW_UNAUTHENTICATED=1` keeps the old behavior, with a warning, for deployments behind a gateway that authenticates clients.
+- `MCP_HOST` now defaults to `127.0.0.1` (was `0.0.0.0`). The Docker image still sets `0.0.0.0`.
+- On the remote transports `update_firmware_by_smart_group` is disabled until `PERCEPXION_FIRMWARE_DIR` is set.
+
 ### Added
 - **Streamable HTTP transport** at `/mcp`, the current MCP transport. `MCP_TRANSPORT=both` serves it and the legacy SSE transport (`/sse`, messages under `/messages/`) from one process, so existing SSE clients keep working while new clients move to Streamable HTTP. `MCP_TRANSPORT=http` serves Streamable HTTP only; `sse` and `stdio` behave as before. The Docker image now defaults to `both` on port 8765.
-- `MCP_STATELESS_HTTP` (answer each Streamable HTTP request without a session, for load-balanced replicas) and `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` (Host and Origin allowlists for the HTTP transports).
+- `MCP_STATELESS_HTTP` (answer each Streamable HTTP request without a session, for load-balanced replicas) and `MCP_ALLOWED_ORIGINS` (browser origins allowed to call the server).
 - **Experimental API-token authentication**, off unless `PERCEPXION_API_TOKEN` is set: `login_with_env` skips the login call and requests send `Authorization: Bearer` with no CSRF header. It targets a proposed Percepxion capability that isn't available on the backend yet; leave it unset and use username and password login.
 
 ### Changed
@@ -12,6 +17,9 @@
 - `uvicorn` is now a declared dependency (the HTTP transports start it directly).
 
 ### Security
+- Bearer-token client authentication on the remote transports, compared in constant time, and Host/Origin validation on every request when the server listens on a non-loopback address (DNS-rebinding protection). See **Breaking**.
+- The Docker image runs as an unprivileged user (uid 10001).
+- Firmware paths are confined to `PERCEPXION_FIRMWARE_DIR` after resolving symlinks, and a path outside it is refused before the server checks whether it exists.
 - Lockfile updates resolve advisories reported by `pip-audit`: FastMCP GHSA-7xgj-8392-5q4r (fixed in 3.4.10), Authlib (nine advisories, fixed by 1.9.2), certifi PYSEC-2026-4320 (2026.10.23), dnspython CVE-2026-114605 (2.9.1), joserfc CVE-2026-119283 and CVE-2026-119284 (1.7.7) and opentelemetry-api CVE-2026-114603 (1.45.2). FastMCP 3.4.8 also applies Host and Origin protection to the SSE transport. `pip-audit` reports no known vulnerabilities in the new lockfile.
 
 ## 1.2.1 - 2026-10-19
