@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 - 2026-11-02
 
 ### Breaking
 - **Remote transports need client authentication.** The HTTP transports (`http`, `sse`, `both`) now require `Authorization: Bearer <MCP_AUTH_TOKEN>` on every request. On a non-loopback `MCP_HOST` the server refuses to start without `MCP_AUTH_TOKEN` (or `MCP_AUTH_TOKEN_FILE`) and without `MCP_ALLOWED_HOSTS`. To upgrade an existing SSE deployment: set both variables, then add the `Authorization` header to every client. `MCP_ALLOW_UNAUTHENTICATED=1` keeps the old behavior, with a warning, for deployments behind a gateway that authenticates clients.
