@@ -52,7 +52,7 @@ This skill operates on two distinct device types. Confusing them causes wrong to
 
 **Never send CLI commands or push firmware without explicit operator confirmation.** `send_direct_cli_command` reaches live infrastructure through a serial path; a wrong port number targets the wrong device. `update_firmware_by_smart_group` is irreversible while in progress.
 
-**Always call `login_with_env` first.** No other tool succeeds without an active session. Despite the name, it authenticates via whichever backend `PERCEPXION_CREDENTIAL_PROVIDER` selects (env, vault, aws, cyberark, command); no different call is needed for non-env providers.
+**Always call `login_with_env` first.** No other tool succeeds without an active session. Despite the name, it authenticates via whichever backend `PERCEPXION_CREDENTIAL_PROVIDER` selects (env, vault, aws, azure, cyberark, command); no different call is needed for non-env providers.
 
 **Read before you write.** Confirm the OOB device with `get_device_list`/`get_device_details`, and confirm the target port shows the expected managed device with `get_security_telemetry` or `get_port_telemetry` before any action that touches it.
 
@@ -105,10 +105,10 @@ claude mcp add percepxion \
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PERCEPXION_USERNAME` | Yes, when `PERCEPXION_CREDENTIAL_PROVIDER=env` (the default) | | Percepxion login username. `PERCEPXION_USERNAME_FILE` reads it from a file instead. Not read by the `vault`, `aws`, or `cyberark` providers; the `command` provider reads it when the command prints only a password. |
+| `PERCEPXION_USERNAME` | Yes, when `PERCEPXION_CREDENTIAL_PROVIDER=env` (the default) | | Percepxion login username. `PERCEPXION_USERNAME_FILE` reads it from a file instead. Not read by the `vault`, `aws`, `azure`, or `cyberark` providers; the `command` provider reads it when the command prints only a password. |
 | `PERCEPXION_PASSWORD` | Yes, when `PERCEPXION_CREDENTIAL_PROVIDER=env` (the default) | | Percepxion login password. `PERCEPXION_PASSWORD_FILE` reads it from a file instead. Not read by the other providers. |
 | `PERCEPXION_API_URL` | No | `https://api.percepxion.ai/api` | API base URL. The wrong domain causes silent auth failures. |
-| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env`, `vault`, `aws`, `cyberark`, or `command`. With a non-env provider, set that provider's variables instead of username/password (table below). |
+| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env`, `vault`, `aws`, `azure`, `cyberark`, or `command`. With a non-env provider, set that provider's variables instead of username/password (table below). |
 | `PERCEPXION_DEFAULT_ORGANIZATION_ID` | No | | Default organization ID when callers omit `organization_id`. Useful for single-organization deployments. `PERCEPXION_DEFAULT_TENANT_ID` is a deprecated alias. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No | | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
@@ -122,6 +122,7 @@ Selected by `PERCEPXION_CREDENTIAL_PROVIDER` on the server process:
 | `env` (default) | `PERCEPXION_USERNAME` + `PERCEPXION_PASSWORD` | Dev, local, simple deployments |
 | `vault` | `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_SECRET_PATH` | HashiCorp Vault |
 | `aws` | `AWS_SECRET_NAME`, `AWS_REGION` | AWS Secrets Manager |
+| `azure` | `AZURE_KEYVAULT_URL`, optional `AZURE_KEYVAULT_SECRET_NAME` (default `percepxion-credentials`); Azure identity via `DefaultAzureCredential` | Azure Key Vault. Secret holds JSON `username`/`password`; needs the `[azure]` extra |
 | `cyberark` | `CYBERARK_URL`, `CYBERARK_APP_ID`, `CYBERARK_SAFE`, `CYBERARK_OBJECT` | CyberArk Central Credential Provider (CCP) |
 | `command` | `PERCEPXION_CREDENTIAL_COMMAND` (optional `PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT`, default 30s) | Any secrets CLI (1Password, Bitwarden, Infisical, Delinea, Keeper, a script). Prints JSON `username`/`password`, or only the password with `PERCEPXION_USERNAME` set |
 

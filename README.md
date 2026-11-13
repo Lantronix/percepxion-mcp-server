@@ -102,7 +102,7 @@ Mount firmware files read-only and set `PERCEPXION_FIRMWARE_DIR` to use `update_
 | `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Deprecated alias for `PERCEPXION_DEFAULT_ORGANIZATION_ID`. Still works; if both are set, the new variable wins. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
-| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, `cyberark`, or `command`. |
+| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, `azure`, `cyberark`, or `command`. |
 | `MCP_TRANSPORT` | No | `stdio` (`both` in the Docker image) | `stdio` for a local client; `http` for Streamable HTTP at `/mcp`; `sse` for legacy HTTP+SSE at `/sse` (messages under `/messages/`); `both` to serve `http` and `sse` from one process. |
 | `MCP_HOST` / `MCP_PORT` | No | `127.0.0.1` / `8765` (`0.0.0.0` in the Docker image) | Listen address for the HTTP transports. Any non-loopback address needs `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`. |
 | `MCP_AUTH_TOKEN` / `MCP_AUTH_TOKEN_FILE` | For non-loopback | , | Bearer token every HTTP request must send (`Authorization: Bearer ...`), at least 16 characters, compared in constant time. `_FILE` reads it from a file (Docker secrets). |
@@ -135,7 +135,7 @@ ships, leave the variable unset and use username/password login.
 
 ### Credential providers
 
-By default, credentials are read from environment variables, or from files named by `PERCEPXION_USERNAME_FILE` and `PERCEPXION_PASSWORD_FILE` (mounted Docker or Kubernetes secrets). Four additional backends are available:
+By default, credentials are read from environment variables, or from files named by `PERCEPXION_USERNAME_FILE` and `PERCEPXION_PASSWORD_FILE` (mounted Docker or Kubernetes secrets). Five additional backends are available:
 
 **HashiCorp Vault:**
 ```
@@ -153,6 +153,18 @@ AWS_REGION=us-east-1
 ```
 
 Install the AWS extra: `pip install -e ".[aws]"`
+
+**Azure Key Vault:**
+
+Reads one secret holding a JSON object with `username` and `password`. Authentication uses `DefaultAzureCredential`: managed identity or workload identity on Azure, `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_CLIENT_SECRET` for a service principal, or an `az login` session on a workstation. The identity needs the **Key Vault Secrets User** role on the vault (or a get-secret access policy on vaults that use access policies).
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=azure
+AZURE_KEYVAULT_URL=https://my-vault.vault.azure.net
+AZURE_KEYVAULT_SECRET_NAME=percepxion-credentials
+```
+
+`AZURE_KEYVAULT_SECRET_NAME` defaults to `percepxion-credentials`. Create the secret with `az keyvault secret set --vault-name my-vault --name percepxion-credentials --file creds.json`. Install the Azure extra: `pip install -e ".[azure]"`. The Docker image doesn't include it; add `pip install ".[azure]"` to a derived image.
 
 **CyberArk Central Credential Provider (CCP):**
 
@@ -283,7 +295,7 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | Tool | Description |
 |---|---|
 | `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
-| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `cyberark`, `command`) and clear the current session. |
+| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `azure`, `cyberark`, `command`) and clear the current session. |
 
 ### Organization management
 
@@ -409,7 +421,7 @@ This server executes operations on network infrastructure. Treat it accordingly.
 - Keep `.env` out of version control (it's in `.gitignore`).
 - Set file permissions: `chmod 600 .env`
 - Use a dedicated Percepxion service account with minimum required permissions. Do not use an admin account for automated workflows.
-- For team environments, use the Vault or AWS Secrets Manager providers instead of plaintext `.env` files.
+- For team environments, use the Vault, AWS Secrets Manager or Azure Key Vault providers instead of plaintext `.env` files.
 
 **CLI command policy:**
 - `send_direct_cli_command` is **read-only by default**. Only recognized read commands (`show`, `get`, `ping`, etc.) pass through.

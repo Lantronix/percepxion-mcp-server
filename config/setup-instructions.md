@@ -63,6 +63,18 @@ Install the extra: `pip install -e ".[aws]"`
 
 The secret value must be a JSON object with `username` and `password` keys.
 
+### Azure Key Vault provider (optional)
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=azure
+AZURE_KEYVAULT_URL=https://my-vault.vault.azure.net
+AZURE_KEYVAULT_SECRET_NAME=percepxion-credentials
+```
+
+Install the extra: `pip install -e ".[azure]"`
+
+The secret value must be a JSON object with `username` and `password` keys. The server authenticates with `DefaultAzureCredential` (managed identity, workload identity, service principal variables `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_CLIENT_SECRET`, or `az login`), and that identity needs the **Key Vault Secrets User** role on the vault.
+
 ### Credentials from files (optional)
 
 For Docker or Kubernetes secrets, point the `env` provider at mounted files instead of putting values in `.env`:

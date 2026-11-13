@@ -22,6 +22,10 @@ dev = [
 aws = [
   "boto3>=1.34",
 ]
+azure = [
+  "azure-identity>=1.19",
+  "azure-keyvault-secrets>=4.9",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

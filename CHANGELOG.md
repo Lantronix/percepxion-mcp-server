@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **Azure Key Vault credential provider.** `PERCEPXION_CREDENTIAL_PROVIDER=azure` reads a JSON `username`/`password` secret from `AZURE_KEYVAULT_URL` (secret name `AZURE_KEYVAULT_SECRET_NAME`, default `percepxion-credentials`). Authentication uses `DefaultAzureCredential`, so managed identity, workload identity, a service principal or `az login` all work. Access-denied, missing-secret, no-identity and unreachable-vault failures each return a specific error, and the secret value never appears in one. Install with the new `azure` extra. `reconfigure_credentials` accepts `azure`.
+
 ## 2.1.0 - 2026-11-13
 
 ### Added
