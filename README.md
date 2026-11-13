@@ -191,7 +191,7 @@ PERCEPXION_USERNAME=svc-percepxion
 PERCEPXION_CREDENTIAL_COMMAND=op read "op://Infra/Percepxion/password"
 ```
 
-`PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT` sets the time limit in seconds (default 30). A non-zero exit fails the login with the exit status and the first 200 characters of stderr; the command's output never appears in errors or logs. The command comes only from the server's environment; `reconfigure_credentials` can switch to this provider but can't change the command.
+`PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT` sets the time limit in seconds (default 30). A non-zero exit fails the login with the exit status only. The first 200 characters of stderr go to the server log, never to the MCP client, and stdout is never logged. The command comes only from the server's environment; `reconfigure_credentials` can switch to this provider but can't change the command.
 
 Full setup details in [`config/setup-instructions.md`](config/setup-instructions.md).
 

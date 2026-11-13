@@ -214,15 +214,20 @@ def test_command_provider_json_missing_keys():
             CommandProvider().get_credentials()
 
 
-def test_command_provider_failure_reports_status_not_stdout():
+def test_command_provider_failure_keeps_output_out_of_error(caplog):
+    import logging
     from percepxion_mcp.providers.command import CommandProvider
-    cmd = _py('import sys; print("leaked-secret"); sys.stderr.write("vault locked"); sys.exit(3)')
+    cmd = _py('import sys; print("leaked-stdout"); sys.stderr.write("leaked-stderr"); sys.exit(3)')
     with patch.dict("os.environ", {"PERCEPXION_CREDENTIAL_COMMAND": cmd}, clear=True):
-        with pytest.raises(RuntimeError) as exc:
-            CommandProvider().get_credentials()
+        with caplog.at_level(logging.WARNING, logger="percepxion_mcp.providers.command"):
+            with pytest.raises(RuntimeError) as exc:
+                CommandProvider().get_credentials()
     msg = str(exc.value)
-    assert "status 3" in msg and "vault locked" in msg
-    assert "leaked-secret" not in msg
+    assert "status 3" in msg
+    assert "leaked-stdout" not in msg and "leaked-stderr" not in msg
+    # stderr reaches the server log only, never the tool result
+    assert "leaked-stderr" in caplog.text
+    assert "leaked-stdout" not in caplog.text
 
 
 def test_command_provider_invalid_json_hides_output():

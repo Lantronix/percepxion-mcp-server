@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- **`command` credential provider.** `PERCEPXION_CREDENTIAL_PROVIDER=command` runs `PERCEPXION_CREDENTIAL_COMMAND` at login and reads the credentials from its output, either a JSON object with `username` and `password` or the password alone with `PERCEPXION_USERNAME`. Any secrets manager with a CLI works this way (1Password, Bitwarden Secrets Manager, Infisical, Delinea, Keeper, an in-house script). The command runs without a shell, has a configurable timeout (`PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT`, default 30 seconds) and its output never appears in errors or logs. `reconfigure_credentials` accepts `command`.
+- **`command` credential provider.** `PERCEPXION_CREDENTIAL_PROVIDER=command` runs `PERCEPXION_CREDENTIAL_COMMAND` at login and reads the credentials from its output, either a JSON object with `username` and `password` or the password alone with `PERCEPXION_USERNAME`. Any secrets manager with a CLI works this way (1Password, Bitwarden Secrets Manager, Infisical, Delinea, Keeper, an in-house script). The command runs without a shell, has a configurable timeout (`PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT`, default 30 seconds) and its output never reaches the MCP client: a failure returns the exit status, and the first 200 characters of stderr go to the server log only. `reconfigure_credentials` accepts `command`.
 - **`_FILE` variables for the `env` provider.** `PERCEPXION_USERNAME_FILE` and `PERCEPXION_PASSWORD_FILE` read the value from the first line of a file, for Docker and Kubernetes secrets. Setting both a variable and its `_FILE` form is an error.
 
 ### Security

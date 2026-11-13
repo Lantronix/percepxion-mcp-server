@@ -1,5 +1,6 @@
 # src/percepxion_mcp/providers/command.py
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -7,6 +8,8 @@ import subprocess
 from . import CredentialProvider, Credentials, read_env_secret
 
 _STDERR_LIMIT = 200
+
+logger = logging.getLogger(__name__)
 
 
 class CommandProvider(CredentialProvider):
@@ -27,7 +30,9 @@ class CommandProvider(CredentialProvider):
         PERCEPXION_USERNAME (or PERCEPXION_USERNAME_FILE).
 
     The command comes only from the server's environment. No tool argument can
-    set or change it. Command output never appears in error messages.
+    set or change it. Command output never appears in error messages, which
+    reach the MCP client. On failure, the first 200 characters of stderr go to
+    the server log only.
     """
 
     def __init__(self) -> None:
@@ -66,8 +71,15 @@ class CommandProvider(CredentialProvider):
 
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip()[:_STDERR_LIMIT]
-            msg = f"Credential command {name} exited with status {proc.returncode}"
-            raise RuntimeError(f"{msg}: {detail}" if detail else msg)
+            if detail:
+                logger.warning(
+                    "Credential command %s exited with status %d, stderr: %s",
+                    name, proc.returncode, detail,
+                )
+            raise RuntimeError(
+                f"Credential command {name} exited with status {proc.returncode}. "
+                "See the server log for its error output."
+            )
 
         return self._parse(proc.stdout or "", name)
 
