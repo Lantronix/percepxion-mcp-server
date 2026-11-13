@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- dnspython 2.9.1 to 2.9.2 for CVE-2026-128089, reported by `pip-audit`. No other lockfile changes; `pip-audit` reports no known vulnerabilities.
+
 ## 2.0.0 - 2026-11-02
 
 ### Breaking
