@@ -15,6 +15,7 @@ When a user asks for help setting up, follow these steps in order:
    - `vault`: HashiCorp Vault, ask for VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH
    - `aws`: AWS Secrets Manager, ask for AWS_SECRET_NAME, AWS_REGION
    - `cyberark`: CyberArk CCP, ask for CYBERARK_URL, CYBERARK_APP_ID, CYBERARK_SAFE, CYBERARK_OBJECT
+   - `command`: any secrets CLI, ask for PERCEPXION_CREDENTIAL_COMMAND and whether it prints JSON or only the password (then PERCEPXION_USERNAME too)
 4. **Create .env**: Copy `.env.example` to `.env` and populate with their values.
 5. **Install dependencies**: Run `pip install -e .` in the repo directory.
 6. **Add to MCP client config**: Use the appropriate template from `config/` for their client and OS. For Claude Desktop, add the JSON block to `claude_desktop_config.json`.
@@ -26,7 +27,7 @@ When a user asks for help setting up, follow these steps in order:
 - `src/percepxion_mcp/client.py`, HTTP session and helpers
 - `src/percepxion_mcp/config.py`, environment variable reads
 - `src/percepxion_mcp/cli_policy.py`, CLI command policy (read-only default)
-- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws/cyberark)
+- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws/cyberark/command)
 - `config/`, example MCP client config files
 - `config/setup-instructions.md`, detailed setup reference
 - `docs/tools.md`, full tool reference

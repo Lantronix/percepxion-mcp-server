@@ -63,6 +63,28 @@ Install the extra: `pip install -e ".[aws]"`
 
 The secret value must be a JSON object with `username` and `password` keys.
 
+### Credentials from files (optional)
+
+For Docker or Kubernetes secrets, point the `env` provider at mounted files instead of putting values in `.env`:
+
+```
+PERCEPXION_USERNAME_FILE=/run/secrets/percepxion_username
+PERCEPXION_PASSWORD_FILE=/run/secrets/percepxion_password
+```
+
+The first line of each file is used. Set either `PERCEPXION_PASSWORD` or `PERCEPXION_PASSWORD_FILE`, not both; the server refuses to log in when both are set.
+
+### Command provider (optional)
+
+Any secrets manager with a CLI works through the `command` provider:
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=command
+PERCEPXION_CREDENTIAL_COMMAND=/usr/local/bin/get-percepxion-creds
+```
+
+The command prints a JSON object with `username` and `password` keys, or only the password, in which case set `PERCEPXION_USERNAME` too. It runs without a shell, so wrap pipes or variable expansion in a script. `PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT` defaults to 30 seconds.
+
 ## Step 3: Add to your MCP client
 
 ### Claude Desktop (macOS/Linux)
