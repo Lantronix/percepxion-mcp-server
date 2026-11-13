@@ -95,14 +95,14 @@ Mount firmware files read-only and set `PERCEPXION_FIRMWARE_DIR` to use `update_
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PERCEPXION_USERNAME` | Yes |, | Percepxion login username |
-| `PERCEPXION_PASSWORD` | Yes |, | Percepxion login password |
+| `PERCEPXION_USERNAME` / `PERCEPXION_USERNAME_FILE` | Yes (`env` provider) |, | Percepxion login username. `_FILE` reads it from the first line of a file (Docker and Kubernetes secrets). Set one form, not both. |
+| `PERCEPXION_PASSWORD` / `PERCEPXION_PASSWORD_FILE` | Yes (`env` provider) |, | Percepxion login password. `_FILE` works the same way. |
 | `PERCEPXION_API_URL` | No | `https://api.percepxion.ai/api` | Percepxion API base URL. Use `https://api.gopercepxion.ai/api` for the Lantronix internal sandbox. |
 | `PERCEPXION_DEFAULT_ORGANIZATION_ID` | No |, | Default organization ID used when callers omit `organization_id`. Useful for single-organization deployments. |
 | `PERCEPXION_DEFAULT_TENANT_ID` | No |, | Deprecated alias for `PERCEPXION_DEFAULT_ORGANIZATION_ID`. Still works; if both are set, the new variable wins. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
-| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, or `cyberark`. |
+| `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, `cyberark`, or `command`. |
 | `MCP_TRANSPORT` | No | `stdio` (`both` in the Docker image) | `stdio` for a local client; `http` for Streamable HTTP at `/mcp`; `sse` for legacy HTTP+SSE at `/sse` (messages under `/messages/`); `both` to serve `http` and `sse` from one process. |
 | `MCP_HOST` / `MCP_PORT` | No | `127.0.0.1` / `8765` (`0.0.0.0` in the Docker image) | Listen address for the HTTP transports. Any non-loopback address needs `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`. |
 | `MCP_AUTH_TOKEN` / `MCP_AUTH_TOKEN_FILE` | For non-loopback | , | Bearer token every HTTP request must send (`Authorization: Bearer ...`), at least 16 characters, compared in constant time. `_FILE` reads it from a file (Docker secrets). |
@@ -135,7 +135,7 @@ ships, leave the variable unset and use username/password login.
 
 ### Credential providers
 
-By default, credentials are read from environment variables. Three additional backends are available:
+By default, credentials are read from environment variables, or from files named by `PERCEPXION_USERNAME_FILE` and `PERCEPXION_PASSWORD_FILE` (mounted Docker or Kubernetes secrets). Four additional backends are available:
 
 **HashiCorp Vault:**
 ```
@@ -173,6 +173,25 @@ CYBERARK_KEY_PATH=/path/to/client.key
 ```
 
 Set `CYBERARK_VERIFY_SSL=false` to skip server cert verification in lab environments. The AppID must be registered in CyberArk with access to the specified safe, and the host running this server must be an allowed machine for that AppID.
+
+**Command (any secrets CLI):**
+
+Runs a command you configure and reads the credentials from its output. Use it for 1Password, Bitwarden Secrets Manager, Infisical, Delinea, Keeper, or an in-house script. The command is split with shell-style quoting and run without a shell, so pipes and `$VARS` don't expand; wrap them in a script if you need them.
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=command
+PERCEPXION_CREDENTIAL_COMMAND=/usr/local/bin/get-percepxion-creds
+```
+
+The command prints either a JSON object with `username` and `password` keys, or the password alone on the first line with the username taken from `PERCEPXION_USERNAME`:
+
+```
+PERCEPXION_CREDENTIAL_PROVIDER=command
+PERCEPXION_USERNAME=svc-percepxion
+PERCEPXION_CREDENTIAL_COMMAND=op read "op://Infra/Percepxion/password"
+```
+
+`PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT` sets the time limit in seconds (default 30). A non-zero exit fails the login with the exit status only. The first 200 characters of stderr go to the server log, never to the MCP client, and stdout is never logged. The command comes only from the server's environment; `reconfigure_credentials` can switch to this provider but can't change the command.
 
 Full setup details in [`config/setup-instructions.md`](config/setup-instructions.md).
 
@@ -264,7 +283,7 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | Tool | Description |
 |---|---|
 | `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
-| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `cyberark`) and clear the current session. |
+| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `cyberark`, `command`) and clear the current session. |
 
 ### Organization management
 
