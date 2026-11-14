@@ -47,9 +47,12 @@ def get_provider(provider_name: str) -> CredentialProvider:
     if provider_name == "cyberark":
         from .cyberark import CyberArkProvider
         return CyberArkProvider()
+    if provider_name == "azure":
+        from .azure import AzureKeyVaultProvider
+        return AzureKeyVaultProvider()
     if provider_name == "command":
         from .command import CommandProvider
         return CommandProvider()
     raise ValueError(
-        f"Unknown credential provider: '{provider_name}'. Choose: env, vault, aws, cyberark, command"
+        f"Unknown credential provider: '{provider_name}'. Choose: env, vault, aws, azure, cyberark, command"
     )

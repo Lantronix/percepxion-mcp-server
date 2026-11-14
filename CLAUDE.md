@@ -14,6 +14,7 @@ When a user asks for help setting up, follow these steps in order:
    - `env` (default): credentials in .env file
    - `vault`: HashiCorp Vault, ask for VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH
    - `aws`: AWS Secrets Manager, ask for AWS_SECRET_NAME, AWS_REGION
+   - `azure`: Azure Key Vault, ask for AZURE_KEYVAULT_URL and AZURE_KEYVAULT_SECRET_NAME, and how the host authenticates to Azure (managed identity, service principal, or az login); install with `pip install -e ".[azure]"`
    - `cyberark`: CyberArk CCP, ask for CYBERARK_URL, CYBERARK_APP_ID, CYBERARK_SAFE, CYBERARK_OBJECT
    - `command`: any secrets CLI, ask for PERCEPXION_CREDENTIAL_COMMAND and whether it prints JSON or only the password (then PERCEPXION_USERNAME too)
 4. **Create .env**: Copy `.env.example` to `.env` and populate with their values.
@@ -27,7 +28,7 @@ When a user asks for help setting up, follow these steps in order:
 - `src/percepxion_mcp/client.py`, HTTP session and helpers
 - `src/percepxion_mcp/config.py`, environment variable reads
 - `src/percepxion_mcp/cli_policy.py`, CLI command policy (read-only default)
-- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws/cyberark/command)
+- `src/percepxion_mcp/providers/`, credential providers (env/vault/aws/azure/cyberark/command)
 - `config/`, example MCP client config files
 - `config/setup-instructions.md`, detailed setup reference
 - `docs/tools.md`, full tool reference
