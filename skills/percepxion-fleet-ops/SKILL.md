@@ -115,7 +115,7 @@ claude mcp add percepxion \
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No | | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
 | `MCP_READ_ONLY` | No | `false` | `true` registers read tools only: write tools aren't listed and a call to one by name is refused with a "read-only" error. CLI write and YOLO flags are forced off. |
-| `MCP_WRITES_UNTIL` | No | | Epoch seconds. At that time the server disables its write tools and sends `tools/list_changed`. Ignored when `MCP_READ_ONLY=true`. |
+| `MCP_WRITES_UNTIL` | No | | Whole epoch seconds, at most 7 days ahead. At that time the server disables its write tools and sends `tools/list_changed`. Ignored when `MCP_READ_ONLY=true`. |
 
 ### Credential Providers
 

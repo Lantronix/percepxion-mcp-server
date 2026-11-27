@@ -22,7 +22,7 @@ from .client import (
     OrganizationResolutionError,
 )
 from .cli_policy import check_command, CLIPolicyViolation
-from .tool_access import ToolRegistry, policy_from_env
+from .tool_access import ToolRegistry, policy_from_env, write_refusal
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -176,6 +176,19 @@ def login_with_env() -> dict[str, Any]:
         "username": creds["username"],
         "correlation_id": session.correlation_id,
     })
+
+
+def _write_window_closed(**done: Any) -> dict[str, Any] | None:
+    """An error when the write window ended since the tool started, else None.
+
+    Multi-step write tools call this before each platform write, so the steps
+    after the end of an MCP_WRITES_UNTIL window don't run. `done` names the
+    steps that already completed, so the caller can see what changed.
+    """
+    reason = write_refusal()
+    if reason is None:
+        return None
+    return _err(f"Stopped before the next platform write. {reason}", details=done or None)
 
 
 def _audit_description(description: str) -> str:
@@ -747,6 +760,8 @@ def update_device_config(
         "Device config update requested, device_id=%s items=%r apply_now=%s",
         device_id, items, apply_now,
     )
+    if (closed := _write_window_closed()):
+        return closed
     save_resp = _api_post("/v1/telemetry/config/save", json_body=save_payload)
     if not save_resp["ok"] or not apply_now:
         return save_resp
@@ -764,6 +779,8 @@ def update_device_config(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed(save=save_resp["data"])):
+        return closed
     job_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
     return _ok({"save": save_resp["data"], "apply_job": job_resp})
 
@@ -819,6 +836,8 @@ def clone_device_config(
         "Config clone requested, source_device_id=%s target_device_id=%s template_name=%s",
         source_device_id, target_device_id, template_name,
     )
+    if (closed := _write_window_closed()):
+        return closed
     create_resp = _api_post("/v1/telemetry/template/create", json_body=template_payload)
     if not create_resp["ok"]:
         return create_resp
@@ -844,6 +863,8 @@ def clone_device_config(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed(template_create=create_resp["data"])):
+        return closed
     apply_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
     return _ok(
         {
@@ -1208,6 +1229,8 @@ def update_firmware_by_smart_group(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         data_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed()):
+        return closed
     try:
         with firmware_path.open("rb") as firmware_file:
             files = {"file": (firmware_path.name, firmware_file, "application/octet-stream")}

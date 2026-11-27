@@ -172,8 +172,22 @@ def test_read_only_still_runs_read_tools():
     assert result.structured_content["ok"] is False
 
 
-def test_unknown_tool_is_not_reported_as_read_only():
+@pytest.mark.parametrize("name", ["no_such_tool", "0123abcd_reboot_device"])
+def test_read_only_refuses_any_name_that_is_not_a_read_tool(name):
+    # Unknown names and hashed backend addresses are refused too, never
+    # looked up and classed as reads.
     srv, _ = build(AccessPolicy(read_only=True))
+
+    async def go():
+        async with Client(srv) as c:
+            await c.call_tool(name, {})
+
+    with pytest.raises(ToolError, match="read-only"):
+        run(go())
+
+
+def test_unknown_tool_with_writes_on_is_not_reported_as_read_only():
+    srv, _ = build(AccessPolicy())
 
     async def go():
         async with Client(srv) as c:
@@ -228,6 +242,9 @@ def test_read_only_env_wiring_in_a_fresh_process(tmp_path):
 # --- environment parsing ---
 
 
+NOW = 1_800_000_000
+
+
 @pytest.mark.parametrize(
     "env, read_only, until",
     [
@@ -235,18 +252,42 @@ def test_read_only_env_wiring_in_a_fresh_process(tmp_path):
         ({"MCP_READ_ONLY": "false"}, False, None),
         ({"MCP_READ_ONLY": "TRUE"}, True, None),
         ({"MCP_READ_ONLY": "1"}, True, None),
-        ({"MCP_WRITES_UNTIL": "2000000000"}, False, 2000000000.0),
+        ({"MCP_WRITES_UNTIL": str(NOW + 8 * 3600)}, False, float(NOW + 8 * 3600)),
+        ({"MCP_WRITES_UNTIL": str(NOW + 7 * 24 * 3600)}, False, float(NOW + 7 * 24 * 3600)),
+        # A time already past is valid: the server starts read-only.
+        ({"MCP_WRITES_UNTIL": str(NOW - 60)}, False, float(NOW - 60)),
         # MCP_WRITES_UNTIL is ignored when MCP_READ_ONLY is true.
-        ({"MCP_READ_ONLY": "true", "MCP_WRITES_UNTIL": "2000000000"}, True, None),
-        # Values that can't be parsed fail closed.
+        ({"MCP_READ_ONLY": "true", "MCP_WRITES_UNTIL": "tomorrow"}, True, None),
+        # Invalid values fail closed.
         ({"MCP_READ_ONLY": "maybe"}, True, None),
         ({"MCP_WRITES_UNTIL": "tomorrow"}, True, None),
+        ({"MCP_WRITES_UNTIL": "nan"}, True, None),
+        ({"MCP_WRITES_UNTIL": "inf"}, True, None),
+        ({"MCP_WRITES_UNTIL": "-1"}, True, None),
+        ({"MCP_WRITES_UNTIL": "1e9"}, True, None),
+        ({"MCP_WRITES_UNTIL": f"{NOW + 60}.5"}, True, None),
+        # Milliseconds by mistake.
+        ({"MCP_WRITES_UNTIL": str((NOW + 3600) * 1000)}, True, None),
+        ({"MCP_WRITES_UNTIL": "10000000001"}, True, None),
+        ({"MCP_WRITES_UNTIL": "9" * 400}, True, None),
+        # More than 7 days after start-up.
+        ({"MCP_WRITES_UNTIL": str(NOW + 7 * 24 * 3600 + 1)}, True, None),
     ],
 )
 def test_policy_from_env(env, read_only, until):
-    policy = policy_from_env(env)
+    policy = policy_from_env(env, clock=FakeClock(NOW))
     assert policy.read_only is read_only
     assert policy.writes_until == until
+    if read_only and env.get("MCP_WRITES_UNTIL") and "MCP_READ_ONLY" not in env:
+        assert "MCP_WRITES_UNTIL" in policy.describe()
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf", "1e400", "9" * 400, "17650000000000", "0x10"])
+def test_bad_writes_until_never_stops_the_server(raw):
+    policy = policy_from_env({"MCP_WRITES_UNTIL": raw}, clock=FakeClock(NOW))
+    srv, guard = build(policy)
+    assert guard.expired is True
+    assert run(tool_names(srv)) == EXPECTED_TOOLS - EXPECTED_WRITE_TOOLS
 
 
 # --- MCP_WRITES_UNTIL ---
@@ -338,3 +379,119 @@ def test_reconfigure_credentials_works_in_process(monkeypatch):
 
     result = run(go())
     assert result.structured_content["ok"] is True
+
+
+# --- monotonic deadline ---
+
+
+def test_setting_the_wall_clock_back_does_not_extend_the_window():
+    wall = FakeClock(1000.0)
+    mono = FakeClock(50.0)
+    srv, _ = build(AccessPolicy(writes_until=2000.0, clock=wall, monotonic=mono))
+
+    async def go():
+        async with Client(srv) as c:
+            assert "reboot_device" in {t.name for t in await c.list_tools()}
+            wall.now = 500.0  # wall clock set back
+            mono.now = 50.0 + 1000.0  # but 1000 s really passed
+            await c.call_tool("reboot_device", {"device_id": "d1"})
+
+    with pytest.raises(ToolError, match="read-only"):
+        run(go())
+
+
+def test_wall_clock_deadline_still_applies_when_monotonic_lags():
+    wall = FakeClock(1000.0)
+    mono = FakeClock(50.0)
+    policy = AccessPolicy(writes_until=2000.0, clock=wall, monotonic=mono)
+    assert policy.writes_allowed()
+    wall.now = 2000.0
+    assert not policy.writes_allowed()
+
+
+# --- the guard inside the write functions ---
+
+
+def test_write_function_refuses_without_the_middleware():
+    clock = FakeClock(1000.0)
+    srv, _ = build(AccessPolicy(writes_until=2000.0, clock=clock))
+    clock.now = 2500.0
+
+    async def go():
+        # run_middleware=False skips the guard middleware entirely.
+        await srv.call_tool("reboot_device", {"device_id": "d1"}, run_middleware=False)
+
+    with pytest.raises(ToolError, match="read-only"):
+        run(go())
+
+
+def _platform_stub(monkeypatch, clock, end_after: str):
+    """Fake _api_post that records calls and ends the window after `end_after`."""
+    calls: list[str] = []
+
+    def fake_post(path, **kwargs):
+        calls.append(path)
+        if path == end_after:
+            clock.now = 5000.0
+        if path == "/v1/telemetry/template/search":
+            return {"ok": True, "data": {"data": [{"id": "tpl-1", "name": "t1", "source_device_id": "src"}]}}
+        return {"ok": True, "data": {"path": path}}
+
+    monkeypatch.setattr(server, "_api_post", fake_post)
+    monkeypatch.setattr(server, "_resolve_organization", lambda *a, **k: None)
+    return calls
+
+
+def _call(srv, name, args):
+    async def go():
+        async with Client(srv) as c:
+            return await c.call_tool(name, args, raise_on_error=False)
+
+    return run(go()).structured_content
+
+
+def test_update_device_config_stops_after_save_when_the_window_ends(monkeypatch):
+    clock = FakeClock(1000.0)
+    srv, _ = build(AccessPolicy(writes_until=2000.0, clock=clock))
+    calls = _platform_stub(monkeypatch, clock, end_after="/v1/telemetry/config/save")
+    result = _call(srv, "update_device_config", {"device_id": "d1", "property_name": "p", "new_value": "v"})
+    assert calls == ["/v1/telemetry/config/save"]
+    assert result["ok"] is False
+    assert "read-only" in result["error"]
+    assert "save" in result["details"]
+
+
+def test_clone_device_config_stops_before_apply_when_the_window_ends(monkeypatch):
+    clock = FakeClock(1000.0)
+    srv, _ = build(AccessPolicy(writes_until=2000.0, clock=clock))
+    calls = _platform_stub(monkeypatch, clock, end_after="/v1/telemetry/template/create")
+    monkeypatch.setattr(
+        server, "_resolve_template_id", lambda *a, **k: {"ok": True, "data": {"template_id": "tpl-1"}}
+    )
+    result = _call(srv, "clone_device_config", {
+        "source_device_id": "src", "target_device_id": "dst", "template_name": "t1", "record_names": ["r"],
+    })
+    assert "/v1/job/jobgroup/create" not in calls
+    assert result["ok"] is False
+    assert "read-only" in result["error"]
+    assert "template_create" in result["details"]
+
+
+def test_firmware_upload_rechecks_before_the_upload(monkeypatch, tmp_path):
+    clock = FakeClock(1000.0)
+    srv, _ = build(AccessPolicy(writes_until=2000.0, clock=clock))
+    calls = _platform_stub(monkeypatch, clock, end_after="never")
+    firmware = tmp_path / "fw.bin"
+    firmware.write_bytes(b"x")
+
+    def resolve_and_end(*a, **k):
+        clock.now = 5000.0  # the window ends while the tool prepares the upload
+        return None
+
+    monkeypatch.setattr(server, "_resolve_organization", resolve_and_end)
+    result = _call(srv, "update_firmware_by_smart_group", {
+        "firmware_file_path": str(firmware), "smart_group_ids": ["sg1"], "content_name": "fw", "version": "1",
+    })
+    assert calls == []
+    assert result["ok"] is False
+    assert "read-only" in result["error"]
