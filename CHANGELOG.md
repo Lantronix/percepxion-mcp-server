@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- **Read and write tool classes, read-only mode and a timed write window.** Every tool now carries the MCP standard annotations: the 24 read tools `readOnlyHint: true`, the 14 write tools `readOnlyHint: false` and `destructiveHint: true`, so clients can tell them apart. `MCP_READ_ONLY=true` registers read tools only, refuses a write tool called by name with a "read-only" error, and forces `PERCEPXION_CLI_WRITE_ENABLED` and `PERCEPXION_CLI_YOLO` off. `MCP_WRITES_UNTIL` (epoch seconds) turns the write tools off at that time, sends `tools/list_changed` to connected clients, and refuses later write calls from clients holding an older tool list; a time already past starts the server read-only. Both default to off, so the tool list and behavior are unchanged unless they're set. A test fails on any tool registered without a class.
+
+### Security
+- `reconfigure_credentials` is refused on the HTTP and SSE transports (`http`, `sse`, `both`, including the Docker image's default). One process serves every remote client, so one client must not switch the credential provider for all of them. Set `PERCEPXION_CREDENTIAL_PROVIDER` in the server's environment instead. The tool still works on stdio.
+
 ## 2.2.0 - 2026-11-15
 
 ### Added
