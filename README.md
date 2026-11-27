@@ -103,6 +103,8 @@ Mount firmware files read-only and set `PERCEPXION_FIRMWARE_DIR` to use `update_
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No |, | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
 | `PERCEPXION_CREDENTIAL_PROVIDER` | No | `env` | Credential backend: `env` (default), `vault`, `aws`, `azure`, `cyberark`, or `command`. |
+| `MCP_READ_ONLY` | No | `false` | `true` registers read tools only, refuses a write tool called by name, and forces `PERCEPXION_CLI_WRITE_ENABLED` and `PERCEPXION_CLI_YOLO` off. See [Read-only mode](#read-only-mode). |
+| `MCP_WRITES_UNTIL` | No | , | Whole epoch seconds, at most 7 days ahead. Write tools are turned off at this time and clients get `tools/list_changed`. A time already past starts the server read-only. Ignored when `MCP_READ_ONLY=true`. |
 | `MCP_TRANSPORT` | No | `stdio` (`both` in the Docker image) | `stdio` for a local client; `http` for Streamable HTTP at `/mcp`; `sse` for legacy HTTP+SSE at `/sse` (messages under `/messages/`); `both` to serve `http` and `sse` from one process. |
 | `MCP_HOST` / `MCP_PORT` | No | `127.0.0.1` / `8765` (`0.0.0.0` in the Docker image) | Listen address for the HTTP transports. Any non-loopback address needs `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`. |
 | `MCP_AUTH_TOKEN` / `MCP_AUTH_TOKEN_FILE` | For non-loopback | , | Bearer token every HTTP request must send (`Authorization: Bearer ...`), at least 16 characters, compared in constant time. `_FILE` reads it from a file (Docker secrets). |
@@ -112,6 +114,23 @@ Mount firmware files read-only and set `PERCEPXION_FIRMWARE_DIR` to use `update_
 | `MCP_ALLOWED_ORIGINS` | No | , | Comma-separated origins allowed to call the server from a browser. A request with any other `Origin` (except one matching its own allowed host) is refused. |
 
 Keep `.env` out of version control. The repo includes `.env.example` as a starting point.
+
+### Read-only mode
+
+Every tool is either a read tool or a write tool, and says so to the client with the MCP standard annotations: read tools carry `readOnlyHint: true`; write tools carry `readOnlyHint: false` and `destructiveHint: true`. A write tool changes state on the Percepxion platform, on a device, or in this server's credential setup. See [Read and write tools](#read-and-write-tools) for the list.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MCP_READ_ONLY` | `false` | `true` registers read tools only. Write tools aren't in the tool list, a call to one by name is refused with a "read-only" error, and `PERCEPXION_CLI_WRITE_ENABLED` and `PERCEPXION_CLI_YOLO` are forced off whatever their values. |
+| `MCP_WRITES_UNTIL` | unset | Whole epoch seconds, at most 7 days after start-up, honored only when `MCP_READ_ONLY` is `false`. Before that time every tool is available. At that time the server disables its write tools, sends `notifications/tools/list_changed` to connected clients, and forces the CLI write flags off; a write call after it is refused even from a client holding an older tool list. A time already past when the server starts means read-only from the start. The deadline is also kept on the monotonic clock and whichever clock reaches it first ends the window, so setting the system clock back doesn't extend it. A multi-step write tool (`update_device_config`, `clone_device_config`, `update_firmware_by_smart_group`) checks again before each platform write and stops, reporting the steps already done, if the window ended mid-call. |
+
+With neither variable set the server behaves exactly as before: all 38 tools, CLI policy from its own variables. An invalid value starts it read-only and logs why: `MCP_READ_ONLY` other than true or false, or a `MCP_WRITES_UNTIL` that isn't a whole number, is above 1e10 (milliseconds by mistake), or is more than 7 days after start-up. With writes off, a call to any name that isn't a read tool is refused. To open a write window of 8 hours:
+
+```bash
+MCP_READ_ONLY=false MCP_WRITES_UNTIL=$(( $(date +%s) + 8*3600 )) python percepxion_mcp.py
+```
+
+The window lasts until the time passes or the server restarts with new settings; a client can't extend it.
 
 ### Experimental: API-token authentication
 
@@ -288,6 +307,15 @@ Or copy into a single project's `.claude/skills/` directory. The same file can b
 
 Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 
+### Read and write tools
+
+| Class | Count | Tools |
+|---|---|---|
+| Read (`readOnlyHint: true`) | 24 | `login_with_env`, `get_device_list`, `get_device_details`, `get_devices_by_organization`, `list_organizations`, `list_tenants`, `list_smart_groups`, `get_cli_command_output`, `get_job_results_by_device`, `get_device_firmware_status`, `get_device_config`, `get_device_syslogs`, `get_security_telemetry`, `investigate_audit_logs`, `investigate_user_audit_logs`, `list_firmware_content`, `list_templates`, `search_job_groups`, `get_job_group`, `query_device_access_log`, `download_device_access_log`, `list_device_ports`, `get_port_telemetry`, `firmware_compliance_report` |
+| Write (`readOnlyHint: false`, `destructiveHint: true`) | 14 | `reconfigure_credentials`, `import_and_assign_devices`, `unassign_devices`, `remove_device_from_platform`, `create_smart_group`, `delete_smart_group`, `send_direct_cli_command`, `update_device_config`, `clone_device_config`, `reboot_device`, `request_device_syslog_upload`, `set_user_access`, `update_firmware_by_smart_group`, `delete_template` |
+
+`login_with_env` is a read tool: it opens a session with the configured credentials and changes nothing on the platform, so read-only mode can still sign in. `get_device_config` is a read tool although its endpoint is `/v1/telemetry/config/edit`: the call returns the editable config tree and saves nothing. `reconfigure_credentials` is a write tool because it changes which credentials every later call uses, and it runs on the stdio transport only.
+
 **Call `login_with_env` before any other tool.** The session persists for the lifetime of the process. On a 401 response, call `login_with_env` again.
 
 ### Authentication and credentials
@@ -295,7 +323,7 @@ Full reference in [`docs/tools.md`](docs/tools.md). Summary below.
 | Tool | Description |
 |---|---|
 | `login_with_env` | Authenticate using the configured credential provider. Call once per session. |
-| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `azure`, `cyberark`, `command`) and clear the current session. |
+| `reconfigure_credentials` | Switch credential provider at runtime (`env`, `vault`, `aws`, `azure`, `cyberark`, `command`) and clear the current session. stdio transport only. |
 
 ### Organization management
 
@@ -430,6 +458,10 @@ This server executes operations on network infrastructure. Treat it accordingly.
 - Set `PERCEPXION_CLI_DENY_COMMANDS` to add custom blocked commands. Set `PERCEPXION_CLI_PERMIT_COMMANDS` for an explicit allowlist.
 - `PERCEPXION_CLI_YOLO=true` disables all filtering. Use only in trusted, isolated environments.
 
+**Read-only mode:**
+- `MCP_READ_ONLY=true` removes every write tool from the server, so an agent with every tool auto-approved still can't reboot a device or change a config through it. Use it for any agent that only needs to look.
+- `MCP_WRITES_UNTIL` turns writes off at a set time without a restart. A write call after that time is refused even if the client never refreshes its tool list.
+
 **Firmware uploads:**
 - `update_firmware_by_smart_group` reads a local file path and uploads it to Percepxion.
 - Set `PERCEPXION_FIRMWARE_DIR` to restrict uploads to a specific directory. Paths are resolved (symlinks included) and anything outside that directory is refused before the server checks whether it exists. On stdio without this variable, any file the server process can read can be uploaded.
@@ -439,7 +471,8 @@ This server executes operations on network infrastructure. Treat it accordingly.
 - Every request needs `Authorization: Bearer <MCP_AUTH_TOKEN>`. On a non-loopback address the server refuses to start without a token unless `MCP_ALLOW_UNAUTHENTICATED=1` is set, which it logs as a security warning.
 - On a non-loopback address `MCP_ALLOWED_HOSTS` is required, and the `Host` and `Origin` of every request are checked against it (DNS-rebinding protection).
 - The server listens on `127.0.0.1` unless `MCP_HOST` says otherwise.
-- **Known limitation: one Percepxion identity.** Every client that holds the token acts as the server's single Percepxion account. Percepxion audit records show that account, not the person behind the MCP client, and the token grants every tool the account's role allows. Give each group of users its own server instance and account when that matters, and keep write access off with the CLI policy above.
+- `reconfigure_credentials` is refused on the HTTP and SSE transports. One process serves every remote client, so the credential provider comes only from `PERCEPXION_CREDENTIAL_PROVIDER` in the server's environment.
+- **Known limitation: one Percepxion identity.** Every client that holds the token acts as the server's single Percepxion account. Percepxion audit records show that account, not the person behind the MCP client, and the token grants every tool the account's role allows. Give each group of users its own server instance and account when that matters, and keep write access off with `MCP_READ_ONLY=true` or the CLI policy above.
 
 **Token handling:**
 - Auth tokens are stored in memory only and are never written to disk.

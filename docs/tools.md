@@ -22,46 +22,48 @@ Quick reference for all tools exposed by the Percepxion MCP server. Designed for
 
 ## Summary table
 
-| Category | Tool | Returns final data | Primary API endpoint(s) | Follow up |
-|---|---|---|---|---|
-| Authentication | `login_with_env` | Yes | `POST /v2/user/login` | None |
-| Organization | `list_organizations` | Yes | `session.permitted_organization_ids` (login-derived) + `POST /v3/device/search` (best-effort names) | None |
-| Organization | `list_tenants` (deprecated alias for `list_organizations`) | Yes | same as `list_organizations` | None |
-| Inventory | `get_device_list` | Yes | `POST /v3/device/search` | None |
-| Inventory | `get_device_details` | Yes | `POST /v3/device/get` | None |
-| Inventory | `get_devices_by_organization` | Yes | `POST /v3/device/search` | None |
-| Lifecycle | `import_and_assign_devices` | Yes (per-device) | `POST /v3/device/assign` | None |
-| Lifecycle | `unassign_devices` | Yes | `POST /v3/device/unassign` | None |
-| Lifecycle | `remove_device_from_platform` | Yes | `POST /v3/device/unassign` | None |
-| Smart Groups | `create_smart_group` | Yes | `POST /v3/device/smartgroup/create` | None |
-| Smart Groups | `list_smart_groups` | Yes | `POST /v3/device/smartgroup/search` | None |
-| Smart Groups | `delete_smart_group` | Yes | `POST /v3/device/smartgroup/delete` | None |
-| CLI | `send_direct_cli_command` | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Config | `update_device_config` | No | `POST /v1/telemetry/config/save` + `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Config | `clone_device_config` | No | `POST /v1/telemetry/template/create` + `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Config | `get_device_config` | Yes | `POST /v1/telemetry/config/view` | None |
-| Config | `list_templates` | Yes | `POST /v1/telemetry/template/search` | None |
-| Config | `delete_template` | Yes | `POST /v1/telemetry/template/delete` | None |
-| Firmware | `get_device_firmware_status` | Yes | `POST /v3/device/get` | None |
-| Firmware | `firmware_compliance_report` | Yes | `POST /v3/device/search` | None |
-| Firmware | `update_firmware_by_smart_group` | No | `POST /v3/content/create` (multipart) | `search_job_groups` |
-| Firmware | `list_firmware_content` | Yes | `POST /v3/content/search` | None |
-| Device Operations | `reboot_device` | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Device Ports | `list_device_ports` | Yes | `POST /v3/port/search` | None |
-| Logs | `request_device_syslog_upload` | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
-| Logs | `get_device_syslogs` | Yes | `POST /v1/storage/file/content/query` | None |
-| Logs | `query_device_access_log` | Yes | `POST /v1/storage/file/devicelog/query-by-id` | None |
-| Logs | `download_device_access_log` | Yes | `POST /v1/storage/file/devicelog/download` | None |
-| Security | `get_security_telemetry` | Yes | `POST /v1/telemetry/stat/view` | None |
-| Security | `get_port_telemetry` | Yes | `POST /v1/telemetry/stat/view` (filtered) | None |
-| Audit | `investigate_audit_logs` | Yes | `POST /v1/audit/search` | None |
-| Audit | `investigate_user_audit_logs` | Yes | `POST /v1/audit/user/search` | None |
-| Access Control | `set_user_access` | Yes | `POST /v2/user/search` + `PUT /v1/user` | None |
-| Jobs | `search_job_groups` | Yes | `POST /v1/job/jobgroup/search` | None |
-| Jobs | `get_job_group` | Yes | `POST /v1/job/jobgroup/get` | None |
-| Jobs | `get_cli_command_output` | Yes | `POST /v1/telemetry/result/search` (`type: "clicmd"`) | None |
-| Jobs | `get_job_results_by_device` | Yes | `POST /v1/telemetry/result/device/search` | None |
-| Credentials | `reconfigure_credentials` | Yes | Credential provider runtime switch | None |
+Class is the tool's MCP annotation: `read` tools carry `readOnlyHint: true`; `write` tools carry `readOnlyHint: false` and `destructiveHint: true`, and aren't registered when `MCP_READ_ONLY=true`. See the README's "Read-only mode" section.
+
+| Category | Tool | Class | Returns final data | Primary API endpoint(s) | Follow up |
+|---|---|---|---|---|---|
+| Authentication | `login_with_env` | read | Yes | `POST /v2/user/login` | None |
+| Organization | `list_organizations` | read | Yes | `session.permitted_organization_ids` (login-derived) + `POST /v3/device/search` (best-effort names) | None |
+| Organization | `list_tenants` (deprecated alias for `list_organizations`) | read | Yes | same as `list_organizations` | None |
+| Inventory | `get_device_list` | read | Yes | `POST /v3/device/search` | None |
+| Inventory | `get_device_details` | read | Yes | `POST /v3/device/get` | None |
+| Inventory | `get_devices_by_organization` | read | Yes | `POST /v3/device/search` | None |
+| Lifecycle | `import_and_assign_devices` | write | Yes (per-device) | `POST /v3/device/assign` | None |
+| Lifecycle | `unassign_devices` | write | Yes | `POST /v3/device/unassign` | None |
+| Lifecycle | `remove_device_from_platform` | write | Yes | `POST /v3/device/unassign` | None |
+| Smart Groups | `create_smart_group` | write | Yes | `POST /v3/device/smartgroup/create` | None |
+| Smart Groups | `list_smart_groups` | read | Yes | `POST /v3/device/smartgroup/search` | None |
+| Smart Groups | `delete_smart_group` | write | Yes | `POST /v3/device/smartgroup/delete` | None |
+| CLI | `send_direct_cli_command` | write | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
+| Config | `update_device_config` | write | No | `POST /v1/telemetry/config/save` + `POST /v1/job/jobgroup/create` | `search_job_groups` |
+| Config | `clone_device_config` | write | No | `POST /v1/telemetry/template/create` + `POST /v1/job/jobgroup/create` | `search_job_groups` |
+| Config | `get_device_config` | read | Yes | `POST /v1/telemetry/config/view` | None |
+| Config | `list_templates` | read | Yes | `POST /v1/telemetry/template/search` | None |
+| Config | `delete_template` | write | Yes | `POST /v1/telemetry/template/delete` | None |
+| Firmware | `get_device_firmware_status` | read | Yes | `POST /v3/device/get` | None |
+| Firmware | `firmware_compliance_report` | read | Yes | `POST /v3/device/search` | None |
+| Firmware | `update_firmware_by_smart_group` | write | No | `POST /v3/content/create` (multipart) | `search_job_groups` |
+| Firmware | `list_firmware_content` | read | Yes | `POST /v3/content/search` | None |
+| Device Operations | `reboot_device` | write | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
+| Device Ports | `list_device_ports` | read | Yes | `POST /v3/port/search` | None |
+| Logs | `request_device_syslog_upload` | write | No | `POST /v1/job/jobgroup/create` | `search_job_groups` |
+| Logs | `get_device_syslogs` | read | Yes | `POST /v1/storage/file/content/query` | None |
+| Logs | `query_device_access_log` | read | Yes | `POST /v1/storage/file/devicelog/query-by-id` | None |
+| Logs | `download_device_access_log` | read | Yes | `POST /v1/storage/file/devicelog/download` | None |
+| Security | `get_security_telemetry` | read | Yes | `POST /v1/telemetry/stat/view` | None |
+| Security | `get_port_telemetry` | read | Yes | `POST /v1/telemetry/stat/view` (filtered) | None |
+| Audit | `investigate_audit_logs` | read | Yes | `POST /v1/audit/search` | None |
+| Audit | `investigate_user_audit_logs` | read | Yes | `POST /v1/audit/user/search` | None |
+| Access Control | `set_user_access` | write | Yes | `POST /v2/user/search` + `PUT /v1/user` | None |
+| Jobs | `search_job_groups` | read | Yes | `POST /v1/job/jobgroup/search` | None |
+| Jobs | `get_job_group` | read | Yes | `POST /v1/job/jobgroup/get` | None |
+| Jobs | `get_cli_command_output` | read | Yes | `POST /v1/telemetry/result/search` (`type: "clicmd"`) | None |
+| Jobs | `get_job_results_by_device` | read | Yes | `POST /v1/telemetry/result/device/search` | None |
+| Credentials | `reconfigure_credentials` | write | Yes | Credential provider runtime switch | None |
 
 ### Deprecated aliases (still functional, use replacements)
 

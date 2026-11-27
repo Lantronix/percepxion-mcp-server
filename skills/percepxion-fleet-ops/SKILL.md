@@ -56,6 +56,8 @@ This skill operates on two distinct device types. Confusing them causes wrong to
 
 **Read before you write.** Confirm the OOB device with `get_device_list`/`get_device_details`, and confirm the target port shows the expected managed device with `get_security_telemetry` or `get_port_telemetry` before any action that touches it.
 
+**A "read-only" refusal is server policy, not a fault.** Each tool carries `readOnlyHint` (true for reads, false plus `destructiveHint` for writes). A server started with `MCP_READ_ONLY=true`, or one whose `MCP_WRITES_UNTIL` window has ended, refuses every write tool. Don't retry or look for another tool that does the same thing; tell the operator writes are off on this server. After a `tools/list_changed` notification, list the tools again.
+
 **Never expose credentials** (`PERCEPXION_USERNAME`, `PERCEPXION_PASSWORD`, `VAULT_TOKEN`, session tokens) in output, logs, or error messages.
 
 ---
@@ -112,6 +114,8 @@ claude mcp add percepxion \
 | `PERCEPXION_DEFAULT_ORGANIZATION_ID` | No | | Default organization ID when callers omit `organization_id`. Useful for single-organization deployments. `PERCEPXION_DEFAULT_TENANT_ID` is a deprecated alias. |
 | `PERCEPXION_REQUEST_TIMEOUT` | No | `45` | HTTP timeout in seconds. Raise for large log downloads or slow links. |
 | `PERCEPXION_FIRMWARE_DIR` | No | | If set, firmware uploads are restricted to files in this directory. Recommended for shared or automated deployments. |
+| `MCP_READ_ONLY` | No | `false` | `true` registers read tools only: write tools aren't listed and a call to one by name is refused with a "read-only" error. CLI write and YOLO flags are forced off. |
+| `MCP_WRITES_UNTIL` | No | | Whole epoch seconds, at most 7 days ahead. At that time the server disables its write tools and sends `tools/list_changed`. Ignored when `MCP_READ_ONLY=true`. |
 
 ### Credential Providers
 
@@ -126,7 +130,7 @@ Selected by `PERCEPXION_CREDENTIAL_PROVIDER` on the server process:
 | `cyberark` | `CYBERARK_URL`, `CYBERARK_APP_ID`, `CYBERARK_SAFE`, `CYBERARK_OBJECT` | CyberArk Central Credential Provider (CCP) |
 | `command` | `PERCEPXION_CREDENTIAL_COMMAND` (optional `PERCEPXION_CREDENTIAL_COMMAND_TIMEOUT`, default 30s) | Any secrets CLI (1Password, Bitwarden, Infisical, Delinea, Keeper, a script). Prints JSON `username`/`password`, or only the password with `PERCEPXION_USERNAME` set |
 
-To switch at runtime: `reconfigure_credentials(provider="vault")`, then `login_with_env` again. This changes which secret store the server reads its own Percepxion session credentials from. It is NOT per-device credential rotation.
+To switch at runtime on the stdio transport: `reconfigure_credentials(provider="vault")`, then `login_with_env` again. Over HTTP or SSE the tool is refused; the provider comes from `PERCEPXION_CREDENTIAL_PROVIDER` in the server's environment. This changes which secret store the server reads its own Percepxion session credentials from. It is NOT per-device credential rotation.
 
 ---
 

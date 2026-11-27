@@ -51,6 +51,17 @@ _EXTRA_DENY_FROM_ENV: frozenset[str] = _load_env_set("PERCEPXION_CLI_DENY_COMMAN
 _PERMIT_FROM_ENV: frozenset[str] = _load_env_set("PERCEPXION_CLI_PERMIT_COMMANDS")
 
 
+def force_read_only() -> None:
+    """Turn the write and YOLO flags off for the rest of the process.
+
+    Called in read-only mode (MCP_READ_ONLY, or an ended MCP_WRITES_UNTIL
+    window) so the CLI policy can't allow writes whatever the environment says.
+    """
+    global _CLI_WRITE_ENABLED, _CLI_YOLO_MODE
+    _CLI_WRITE_ENABLED = False
+    _CLI_YOLO_MODE = False
+
+
 class CLIPolicyViolation(Exception):
     """Raised when a command is blocked by policy."""
 

@@ -1,7 +1,7 @@
 # Adding new tools
 
 This server maps Percepxion REST APIs into MCP tools.
-A tool is a Python function decorated with `@mcp.tool()`.
+A tool is a Python function decorated with `@read_tool` or `@write_tool`.
 
 This guide covers the conventions used in this repo.
 
@@ -48,14 +48,25 @@ Examples:
 ### 3. Add the function
 
 Add the tool under the closest category in the file.
-Use `@mcp.tool()` and a clear docstring.
+Use `@read_tool` or `@write_tool` and a clear docstring, never a bare `@mcp.tool()`.
+
+- `@read_tool`: the tool only reads. Clients see `readOnlyHint: true`.
+- `@write_tool`: the tool changes state on the Percepxion platform, on a device,
+  or in this server's credential setup. Clients see `readOnlyHint: false` and
+  `destructiveHint: true`. With `MCP_READ_ONLY=true` the tool isn't registered.
+
+Classify by effect, not by name: a tool that starts a job, changes a record, or
+switches credentials is a write even if its name starts with `get_` or `request_`.
+When in doubt, use `@write_tool`. `tests/test_tool_access.py` fails on a tool
+registered without a class and pins the list of write tools, so add the new name
+there too.
 
 Template:
 
 ```python
 from typing import Any
 
-@mcp.tool()
+@read_tool
 def get_organizations(limit: int = 100, offset: int = 0) -> dict[str, Any]:
     """List organizations visible to the current user."""
 
@@ -100,7 +111,7 @@ A tool that creates a job group should:
 Pattern:
 
 ```python
-@mcp.tool()
+@write_tool
 def reboot_device(device_id: str, name: str | None = None) -> dict[str, Any]:
     """Request a reboot via a job group."""
 
@@ -135,7 +146,7 @@ Avoid local absolute paths in docs.
 
 Update these docs when you add tools:
 
-- `README.md` tool catalog section
+- `README.md` tool catalog section and the read and write tool table
 - `docs/tools.md` summary table
 - `skills/percepxion-fleet-ops/SKILL.md` if the change affects usage patterns, parameters, or safety behavior. `tests/test_skill_doc.py` fails when tool names in the skill drift from `server.py`, but behavior text is on you: update it in the same PR.
 
@@ -152,6 +163,7 @@ Then start the server and call the new tool.
 ## Tool quality checklist
 
 - Docstring states what the tool does.
+- Tool is registered with `@read_tool` or `@write_tool`.
 - Parameters have defaults and simple types.
 - Return value uses `_ok()` or `_err()`.
 - Tool accepts `organization_id` (with `tenant_id` accepted as a deprecated alias) when the API supports it.

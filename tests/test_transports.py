@@ -7,6 +7,8 @@ client uses. Only initialize and tools/list run; no Percepxion call is made.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import socket
 import threading
 import time
@@ -98,3 +100,31 @@ def test_stateless_http_still_answers():
 def test_unknown_transport_is_refused():
     with pytest.raises(ValueError, match="MCP_TRANSPORT"):
         build_http_app("websocket")
+
+
+async def _reconfigure(open_streams) -> dict:
+    async with open_streams as streams:
+        read, write = streams[0], streams[1]
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("reconfigure_credentials", {"provider": "env"})
+            return json.loads(result.content[0].text)
+
+
+@pytest.mark.parametrize("transport", ["http", "sse", "both"])
+def test_reconfigure_credentials_is_refused_over_http(monkeypatch, transport):
+    monkeypatch.setenv("PERCEPXION_CREDENTIAL_PROVIDER", "vault")
+    with _Server(transport) as base:
+        if transport == "sse":
+            data = _run(_reconfigure(sse_client(f"{base}/sse")))
+        else:
+            data = _run(_reconfigure(streamable_http_client(f"{base}/mcp")))
+    assert data["ok"] is False
+    assert "stdio only" in data["error"]
+    # The provider the server was started with is untouched.
+    assert os.environ["PERCEPXION_CREDENTIAL_PROVIDER"] == "vault"
+
+
+def test_reconfigure_credentials_is_still_listed_over_http():
+    with _Server("http") as base:
+        assert "reconfigure_credentials" in _run(_list_over_http(base))

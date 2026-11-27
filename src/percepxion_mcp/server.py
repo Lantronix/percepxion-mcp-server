@@ -22,6 +22,7 @@ from .client import (
     OrganizationResolutionError,
 )
 from .cli_policy import check_command, CLIPolicyViolation
+from .tool_access import ToolRegistry, policy_from_env, write_refusal
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -30,7 +31,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("percepxion_mcp")
 
-mcp = FastMCP("Percepxion-Server")
+SERVER_NAME = "Percepxion-Server"
+mcp = FastMCP(SERVER_NAME)
+
+# Every tool declares its class with one of these decorators (see
+# tool_access.py). @read_tool: only reads. @write_tool: changes state on the
+# platform, a device, or this server's credential setup. The tools are
+# registered on `mcp` at the end of this module, after MCP_READ_ONLY and
+# MCP_WRITES_UNTIL are read.
+tools = ToolRegistry()
+read_tool = tools.read
+write_tool = tools.write
 
 
 def _effective_org_id(organization_id: str | None, tenant_id: str | None) -> str | None:
@@ -53,7 +64,7 @@ def _effective_org_id(organization_id: str | None, tenant_id: str | None) -> str
     return None
 
 
-@mcp.tool()
+@read_tool
 def login_with_env() -> dict[str, Any]:
     """
     Authenticate using credentials from the configured provider.
@@ -167,6 +178,19 @@ def login_with_env() -> dict[str, Any]:
     })
 
 
+def _write_window_closed(**done: Any) -> dict[str, Any] | None:
+    """An error when the write window ended since the tool started, else None.
+
+    Multi-step write tools call this before each platform write, so the steps
+    after the end of an MCP_WRITES_UNTIL window don't run. `done` names the
+    steps that already completed, so the caller can see what changed.
+    """
+    reason = write_refusal()
+    if reason is None:
+        return None
+    return _err(f"Stopped before the next platform write. {reason}", details=done or None)
+
+
 def _audit_description(description: str) -> str:
     """Append the per-login correlation id to an audit description so an
     MCP-brokered device action is traceable to one session in both the MCP
@@ -176,19 +200,28 @@ def _audit_description(description: str) -> str:
     return description
 
 
-@mcp.tool()
+@write_tool
 def reconfigure_credentials(provider: str) -> dict[str, Any]:
     """
     Switch the active credential provider and clear the current session.
 
     After calling this, run login_with_env to authenticate with the new provider.
     Valid providers: 'env', 'vault', 'aws', 'azure', 'cyberark', 'command'.
+    Available on the stdio transport only.
 
     Args:
         provider: The credential provider to activate.
     """
     import os
     from .providers import get_provider
+
+    if _on_remote_transport():
+        # One process serves every remote client: one of them must not change
+        # where the credentials for all of them come from.
+        return _err(
+            "reconfigure_credentials is disabled on the HTTP and SSE transports (stdio only). "
+            "Set PERCEPXION_CREDENTIAL_PROVIDER in the server's environment and restart it."
+        )
 
     valid = {"env", "vault", "aws", "azure", "cyberark", "command"}
     if provider not in valid:
@@ -205,7 +238,7 @@ def reconfigure_credentials(provider: str) -> dict[str, Any]:
     return _ok({"message": f"Provider set to '{provider}'. Run login_with_env to authenticate."})
 
 
-@mcp.tool()
+@read_tool
 def get_device_list(
     search_query: str = "*",
     limit: int = 25,
@@ -228,7 +261,7 @@ def get_device_list(
     return _api_post("/v3/device/search", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_device_details(device_id: str | None = None, serial_num: str | None = None, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Get full device properties by device_id or serial_num."""
     if not device_id and not serial_num:
@@ -245,7 +278,7 @@ def get_device_details(device_id: str | None = None, serial_num: str | None = No
     return _api_post("/v3/device/get", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_devices_by_organization(
     organization_id: str | None = None,
     tenant_id: str | None = None,
@@ -354,7 +387,7 @@ def _list_organizations_impl(
     return _ok({"organizations": page, "total": total})
 
 
-@mcp.tool()
+@read_tool
 def list_organizations(
     search_query: str = "*",
     limit: int = 100,
@@ -380,7 +413,7 @@ def list_organizations(
     return _list_organizations_impl(search_query, limit, offset, sort, order)
 
 
-@mcp.tool()
+@read_tool
 def list_tenants(
     search_query: str = "*",
     limit: int = 100,
@@ -401,7 +434,7 @@ def list_tenants(
     return _list_organizations_impl(search_query, limit, offset, sort, order)
 
 
-@mcp.tool()
+@write_tool
 def import_and_assign_devices(devices: list[dict[str, Any]], organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Assign devices to a Percepxion organization/project.
@@ -438,7 +471,7 @@ def import_and_assign_devices(devices: list[dict[str, Any]], organization_id: st
     return _ok({"results": results})
 
 
-@mcp.tool()
+@write_tool
 def unassign_devices(device_ids: list[str], organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Unassign one or more devices from a project/organization."""
     if not device_ids:
@@ -450,14 +483,14 @@ def unassign_devices(device_ids: list[str], organization_id: str | None = None, 
     return _api_post("/v3/device/unassign", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def remove_device_from_platform(device_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Convenience wrapper for removing one device."""
     logger.info("Device removal from platform requested, device_id=%s", device_id)
     return unassign_devices([device_id], organization_id=organization_id, tenant_id=tenant_id)
 
 
-@mcp.tool()
+@write_tool
 def create_smart_group(
     name: str,
     query: str | None = None,
@@ -500,7 +533,7 @@ def create_smart_group(
     return _api_post("/v3/device/smartgroup/create", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def list_smart_groups(
     search_query: str = "*",
     limit: int = 50,
@@ -530,7 +563,7 @@ def list_smart_groups(
     return _api_post("/v3/device/smartgroup/search", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def delete_smart_group(smart_group_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Delete a Smart Group by ID.
@@ -549,7 +582,7 @@ def delete_smart_group(smart_group_id: str, organization_id: str | None = None, 
     return _api_post("/v3/device/smartgroup/delete", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def send_direct_cli_command(
     device_id: str,
     command: str,
@@ -609,7 +642,7 @@ def send_direct_cli_command(
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_cli_command_output(
     job_group_id: str,
     device_id: str,
@@ -654,7 +687,7 @@ def get_cli_command_output(
     return resp
 
 
-@mcp.tool()
+@read_tool
 def get_job_results_by_device(
     job_group_id: str,
     result_type: str = "clicmd",
@@ -697,7 +730,7 @@ def get_job_results_by_device(
     return _api_post("/v1/telemetry/result/device/search", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def update_device_config(
     device_id: str,
     items: list[dict[str, str]] | None = None,
@@ -727,6 +760,8 @@ def update_device_config(
         "Device config update requested, device_id=%s items=%r apply_now=%s",
         device_id, items, apply_now,
     )
+    if (closed := _write_window_closed()):
+        return closed
     save_resp = _api_post("/v1/telemetry/config/save", json_body=save_payload)
     if not save_resp["ok"] or not apply_now:
         return save_resp
@@ -744,6 +779,8 @@ def update_device_config(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed(save=save_resp["data"])):
+        return closed
     job_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
     return _ok({"save": save_resp["data"], "apply_job": job_resp})
 
@@ -773,7 +810,7 @@ def _resolve_template_id(template_name: str, source_device_id: str, organization
     return _err("Template created but template_id could not be resolved from template/search.", details=resp["data"])
 
 
-@mcp.tool()
+@write_tool
 def clone_device_config(
     source_device_id: str,
     target_device_id: str,
@@ -799,6 +836,8 @@ def clone_device_config(
         "Config clone requested, source_device_id=%s target_device_id=%s template_name=%s",
         source_device_id, target_device_id, template_name,
     )
+    if (closed := _write_window_closed()):
+        return closed
     create_resp = _api_post("/v1/telemetry/template/create", json_body=template_payload)
     if not create_resp["ok"]:
         return create_resp
@@ -824,6 +863,8 @@ def clone_device_config(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         job_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed(template_create=create_resp["data"])):
+        return closed
     apply_resp = _api_post("/v1/job/jobgroup/create", json_body=job_payload)
     return _ok(
         {
@@ -834,7 +875,7 @@ def clone_device_config(
     )
 
 
-@mcp.tool()
+@read_tool
 def get_device_firmware_status(device_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """Get device details and summarize firmware version/state."""
     resp = get_device_details(device_id=device_id, organization_id=organization_id, tenant_id=tenant_id)
@@ -858,7 +899,7 @@ def get_device_firmware_status(device_id: str, organization_id: str | None = Non
     return _ok(summary)
 
 
-@mcp.tool()
+@write_tool
 def reboot_device(
     device_id: str,
     description: str = "Reboot requested via MCP",
@@ -892,7 +933,7 @@ def reboot_device(
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_device_config(
     device_id: str,
     selected: bool = True,
@@ -922,7 +963,7 @@ def get_device_config(
     return _api_post("/v1/telemetry/config/edit", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def request_device_syslog_upload(
     device_ids: list[str],
     log_type: str = "all",
@@ -964,7 +1005,7 @@ def request_device_syslog_upload(
     return _api_post("/v1/job/jobgroup/create", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_device_syslogs(device_id: str, limit: int = 10) -> dict[str, Any]:
     """Query device syslog files already uploaded to Percepxion."""
     payload = {
@@ -975,7 +1016,7 @@ def get_device_syslogs(device_id: str, limit: int = 10) -> dict[str, Any]:
     return _api_post("/v1/storage/file/content/query", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_security_telemetry(device_id: str, selected: bool = True, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Retrieve full device and per-port telemetry for a Percepxion-managed OOB device.
@@ -1001,7 +1042,7 @@ def get_security_telemetry(device_id: str, selected: bool = True, organization_i
     return _api_post("/v1/telemetry/stat/view", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def investigate_audit_logs(
     search_string: str = "",
     from_date: str | None = None,
@@ -1034,7 +1075,7 @@ def investigate_audit_logs(
     return _api_post("/v1/audit/search", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def investigate_user_audit_logs(
     user_filter: str = "",
     limit: int = 50,
@@ -1057,7 +1098,7 @@ def investigate_user_audit_logs(
     return _api_post("/v1/audit/user/search", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def set_user_access(
     usernames: list[str],
     enabled: bool,
@@ -1138,7 +1179,7 @@ def set_user_access(
     })
 
 
-@mcp.tool()
+@write_tool
 def update_firmware_by_smart_group(
     firmware_file_path: str,
     smart_group_ids: list[str],
@@ -1188,6 +1229,8 @@ def update_firmware_by_smart_group(
     if (t := _resolve_organization(_effective_org_id(organization_id, tenant_id), required=True)):
         data_payload["tenant_id"] = t
 
+    if (closed := _write_window_closed()):
+        return closed
     try:
         with firmware_path.open("rb") as firmware_file:
             files = {"file": (firmware_path.name, firmware_file, "application/octet-stream")}
@@ -1206,7 +1249,7 @@ def update_firmware_by_smart_group(
         return _err(f"Unable to open firmware file: {exc}")
 
 
-@mcp.tool()
+@read_tool
 def list_firmware_content(
     search_query: str = "*",
     limit: int = 50,
@@ -1237,7 +1280,7 @@ def list_firmware_content(
     return _api_post("/v3/content/search", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def list_templates(
     search_query: str = "*",
     device_id: str | None = None,
@@ -1273,7 +1316,7 @@ def list_templates(
     return _api_post("/v1/telemetry/template/search", json_body=payload)
 
 
-@mcp.tool()
+@write_tool
 def delete_template(template_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Delete a config template by ID.
@@ -1292,7 +1335,7 @@ def delete_template(template_id: str, organization_id: str | None = None, tenant
     return _api_post("/v1/telemetry/template/delete", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def search_job_groups(
     search_string: str = "",
     job_type: str = "command",
@@ -1317,7 +1360,7 @@ def search_job_groups(
     return _api_post("/v1/job/jobgroup/search", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_job_group(job_group_id: str, organization_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
     """
     Get full details and output for a specific job group by ID.
@@ -1336,7 +1379,7 @@ def get_job_group(job_group_id: str, organization_id: str | None = None, tenant_
     return _api_post("/v1/job/jobgroup/get", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def query_device_access_log(
     device_id: str,
     log_level: str = "info",
@@ -1353,7 +1396,7 @@ def query_device_access_log(
     return _api_post("/v1/storage/file/devicelog/query-by-id", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def download_device_access_log(device_id: str, log_level: str = "info") -> dict[str, Any]:
     """Download complete device access log content."""
     payload = {
@@ -1363,7 +1406,7 @@ def download_device_access_log(device_id: str, log_level: str = "info") -> dict[
     return _api_post("/v1/storage/file/devicelog/download", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def list_device_ports(
     device_id: str,
     limit: int = 100,
@@ -1399,7 +1442,7 @@ def list_device_ports(
     return _api_post("/v3/port/search", json_body=payload)
 
 
-@mcp.tool()
+@read_tool
 def get_port_telemetry(
     device_id: str,
     port_number: int,
@@ -1446,7 +1489,7 @@ def get_port_telemetry(
     }
 
 
-@mcp.tool()
+@read_tool
 def firmware_compliance_report(
     expected_firmware_version: str,
     search_query: str = "*",
@@ -1522,6 +1565,23 @@ def firmware_compliance_report(
 # Set by main() when an HTTP transport is used: tools that touch local files
 # then require an explicit allowed directory.
 REMOTE_TRANSPORT = False
+
+
+def _on_remote_transport() -> bool:
+    """True when the server runs an HTTP transport or this call came over HTTP."""
+    if REMOTE_TRANSPORT:
+        return True
+    from fastmcp.server.dependencies import get_http_request
+
+    try:
+        get_http_request()
+    except RuntimeError:
+        return False
+    return True
+
+
+# Register the tools MCP_READ_ONLY and MCP_WRITES_UNTIL allow.
+access_guard = tools.register(mcp, policy_from_env())
 
 
 def build_http_app(
